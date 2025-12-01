@@ -4,18 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Happy Script - Reports Viewer</title>
-
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div class="header">
     <h1>📄 Reports Viewer</h1>
-    <p>Đọc tất cả báo cáo từ Firebase</p>
+    <p>Nhận tất cả báo cáo từ HAPPY script</p>
 </div>
 
 <div id="report-container" class="container">
     <div class="loading">Đang tải dữ liệu...</div>
+</div>
+
+<!-- Confirmation Popup -->
+<div id="confirm-popup" class="popup hidden">
+    <div class="popup-content">
+        <h2>Bạn có muốn xóa Report này?</h2>
+        <div class="popup-buttons">
+            <button id="confirm-yes">Có</button>
+            <button id="confirm-no">Không</button>
+        </div>
+    </div>
 </div>
 
 <script src="script.js"></script>
