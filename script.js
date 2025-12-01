@@ -2,6 +2,11 @@ const API_BASE = "https://happy-script-bada6-default-rtdb.asia-southeast1.fireba
 const API_URL = API_BASE + ".json";
 
 const container = document.getElementById("report-container");
+const popup = document.getElementById("confirm-popup");
+const confirmYes = document.getElementById("confirm-yes");
+const confirmNo = document.getElementById("confirm-no");
+
+let selectedPlayer = null; // player đang chọn để xóa
 
 // Format timestamp
 function formatDate(ts) {
@@ -11,19 +16,27 @@ function formatDate(ts) {
 }
 
 // Xóa report của player
-async function approveReport(playerName) {
+async function deleteReport(playerName) {
     const deleteURL = `${API_BASE}/${playerName}.json`;
-
     try {
-        await fetch(deleteURL, {
-            method: "DELETE"
-        });
-
-        loadReports(); // refresh UI
+        await fetch(deleteURL, { method: "DELETE" });
+        loadReports();
     } catch (err) {
         console.error("Delete failed:", err);
-        alert("Không thể duyệt report!");
+        alert("Không thể xóa report!");
     }
+}
+
+// Hiện popup xác nhận
+function showConfirm(playerName) {
+    selectedPlayer = playerName;
+    popup.classList.add("show");
+}
+
+// Ẩn popup
+function hideConfirm() {
+    selectedPlayer = null;
+    popup.classList.remove("show");
 }
 
 // Render reports
@@ -45,13 +58,9 @@ function renderReports(data) {
             <div class="name">👤 ${playerName}</div>
             <div class="message">${report.message || "(Không có nội dung)"}</div>
             <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
-
-            <div class="card-footer">
-                <button class="approve-btn" onclick="approveReport('${playerName}')">
-                    Duyệt ✔
-                </button>
-            </div>
         `;
+
+        card.addEventListener("click", () => showConfirm(playerName));
 
         container.appendChild(card);
     });
@@ -71,6 +80,21 @@ async function loadReports() {
         console.error(error);
     }
 }
+
+// Popup button events
+confirmYes.addEventListener("click", () => {
+    if (selectedPlayer) {
+        deleteReport(selectedPlayer);
+        hideConfirm();
+    }
+});
+
+confirmNo.addEventListener("click", hideConfirm);
+
+// Esc key để hủy popup
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideConfirm();
+});
 
 // Refresh mỗi 10 giây
 setInterval(loadReports, 10000);
