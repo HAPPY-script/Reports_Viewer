@@ -44,6 +44,7 @@ body {
     margin-bottom: 18px;
     border: 1px solid #2e2e3d;
     transition: 0.2s;
+    cursor: pointer;
 }
 
 .card:hover {
@@ -70,32 +71,78 @@ body {
     opacity: 0.55;
 }
 
-.card-footer {
-    margin-top: 15px;
+/* Popup */
+.popup {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    backdrop-filter: blur(4px);
+    background: rgba(0,0,0,0.7);
     display: flex;
-    justify-content: flex-end;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: 0.3s;
 }
 
-.approve-btn {
-    padding: 10px 18px;
+.popup-content {
+    background: #1b1b24;
+    padding: 30px 40px;
+    border-radius: 14px;
+    text-align: center;
+    box-shadow: 0 0 20px rgba(80, 80, 255, 0.5);
+}
+
+.popup h2 {
+    margin: 0 0 20px;
+    font-size: 20px;
+}
+
+.popup-buttons {
+    display: flex;
+    justify-content: space-around;
+    gap: 20px;
+}
+
+.popup button {
+    padding: 10px 20px;
     border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: 0.25s;
+}
+
+#confirm-yes {
     background: #3a3aff;
     color: white;
-    font-family: inherit;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 600;
-    transition: 0.25s;
     box-shadow: 0 0 10px rgba(60, 60, 255, 0.25);
 }
 
-.approve-btn:hover {
+#confirm-yes:hover {
     background: #5555ff;
     box-shadow: 0 0 16px rgba(90, 90, 255, 0.45);
-    transform: translateY(-2px);
 }
 
-.approve-btn:active {
-    transform: scale(0.94);
+#confirm-no {
+    background: #ff3a3a;
+    color: white;
+    box-shadow: 0 0 10px rgba(255, 60, 60, 0.25);
 }
+
+#confirm-no:hover {
+    background: #ff5555;
+    box-shadow: 0 0 16px rgba(255, 90, 90, 0.45);
+}
+
+/* Show popup */
+.popup.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
