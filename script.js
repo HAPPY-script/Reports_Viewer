@@ -1,4 +1,5 @@
-const API_URL = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports.json";
+const API_BASE = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
+const API_URL = API_BASE + ".json";
 
 const container = document.getElementById("report-container");
 
@@ -7,6 +8,22 @@ function formatDate(ts) {
     if (!ts) return "";
     const d = new Date(ts);
     return d.toLocaleString();
+}
+
+// Xóa report của player
+async function approveReport(playerName) {
+    const deleteURL = `${API_BASE}/${playerName}.json`;
+
+    try {
+        await fetch(deleteURL, {
+            method: "DELETE"
+        });
+
+        loadReports(); // refresh UI
+    } catch (err) {
+        console.error("Delete failed:", err);
+        alert("Không thể duyệt report!");
+    }
 }
 
 // Render reports
@@ -28,6 +45,12 @@ function renderReports(data) {
             <div class="name">👤 ${playerName}</div>
             <div class="message">${report.message || "(Không có nội dung)"}</div>
             <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
+
+            <div class="card-footer">
+                <button class="approve-btn" onclick="approveReport('${playerName}')">
+                    Duyệt ✔
+                </button>
+            </div>
         `;
 
         container.appendChild(card);
