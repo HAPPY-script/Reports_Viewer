@@ -74,6 +74,7 @@ async function fetchAvatarImageUrl(userId, size = "150x150") {
 }
 
 // Create a card element
+// Create a card element
 function createCard(playerKey, report, avatarUrl, userId) {
     const card = document.createElement("div");
     card.className = "card";
@@ -94,7 +95,35 @@ function createCard(playerKey, report, avatarUrl, userId) {
         <div class="timestamp">⏱ ${tsText}</div>
     `;
 
+    // Click card để show popup
     card.addEventListener("click", () => showConfirm(playerKey));
+
+    // Copy name khi bấm
+    const nameEl = card.querySelector(".name");
+    if (nameEl) {
+        nameEl.style.cursor = "pointer"; // hiển thị con trỏ tay
+        nameEl.title = "Click để copy tên";
+        nameEl.addEventListener("click", (e) => {
+            e.stopPropagation(); // tránh trigger popup
+            navigator.clipboard.writeText(playerKey)
+                .then(() => alert(`Đã copy tên: ${playerKey}`))
+                .catch(() => alert("Copy thất bại"));
+        });
+    }
+
+    // Copy ID khi bấm
+    const idEl = card.querySelector(".userid");
+    if (idEl && userId) {
+        idEl.style.cursor = "pointer";
+        idEl.title = "Click để copy ID";
+        idEl.addEventListener("click", (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(userId.toString())
+                .then(() => alert(`Đã copy ID: ${userId}`))
+                .catch(() => alert("Copy thất bại"));
+        });
+    }
+
     return card;
 }
 
