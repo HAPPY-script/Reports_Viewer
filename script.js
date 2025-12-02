@@ -15,37 +15,51 @@ function formatDate(ts) {
     return d.toLocaleString();
 }
 
-// Get Roblox Avatar API
-function getAvatarURL(userId) {
-    return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
+// Lấy avatar Roblox từ UserID
+async function getAvatar(userId) {
+    try {
+        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`);
+        const json = await res.json();
+        return json.data && json.data[0] ? json.data[0].imageUrl : "";
+    } catch {
+        return "";
+    }
 }
 
-// Delete report
+// Lấy UserID từ Username
+async function getUserId(username) {
+    try {
+        const res = await fetch(`https://api.roblox.com/users/get-by-username?username=${username}`);
+        const json = await res.json();
+        return json.Id || null;
+    } catch {
+        return null;
+    }
+}
+
+// Xóa report
 async function deleteReport(playerName) {
     const deleteURL = `${API_BASE}/${playerName}.json`;
     try {
         await fetch(deleteURL, { method: "DELETE" });
         loadReports();
     } catch (err) {
-        console.error("Delete failed:", err);
         alert("Không thể xóa report!");
     }
 }
 
-// Popup show
+// Popup
 function showConfirm(playerName) {
     selectedPlayer = playerName;
     popup.classList.add("show");
 }
-
-// Hide popup
 function hideConfirm() {
     selectedPlayer = null;
     popup.classList.remove("show");
 }
 
-// Render UI
-function renderReports(data) {
+// Render reports
+async function renderReports(data) {
     container.innerHTML = "";
 
     if (!data) {
@@ -53,34 +67,36 @@ function renderReports(data) {
         return;
     }
 
-    Object.keys(data).forEach(key => {
-        const report = data[key];
-        const userId = report.userId || 0;
-        const avatarURL = getAvatarURL(userId);
-
+    for (const playerName of Object.keys(data)) {
+        const report = data[playerName];
+        const userId = await getUserId(playerName);
+        const avatarUrl = userId ? await getAvatar(userId) : "";
+        
         const card = document.createElement("div");
         card.className = "card";
 
         card.innerHTML = `
             <div class="top-section">
-                <img src="${avatarURL}" class="avatar">
+                <img class="avatar" src="${avatarUrl}" alt="avatar">
+
                 <div class="info">
-                    <div class="name">👤 ${report.playerName || key}</div>
-                    <div class="userid">ID: ${userId}</div>
+                    <div class="name">👤 ${playerName}</div>
+                    <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
                 </div>
             </div>
 
             <div class="message">${report.message || "(Không có nội dung)"}</div>
 
-            <div class="timestamp">⏱ ${formatDate(report.timestamp)}</div>
+            <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
         `;
 
-        card.addEventListener("click", () => showConfirm(key));
+        card.addEventListener("click", () => showConfirm(playerName));
+
         container.appendChild(card);
-    });
+    }
 }
 
-// Fetch
+// Fetch reports
 async function loadReports() {
     container.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
 
@@ -88,22 +104,27 @@ async function loadReports() {
         const res = await fetch(API_URL);
         const json = await res.json();
         renderReports(json);
-    } catch (err) {
+    } catch {
         container.innerHTML = "<div class='loading'>Lỗi tải dữ liệu.</div>";
-        console.error(err);
     }
 }
 
+// Popup buttons
 confirmYes.addEventListener("click", () => {
-    if (selectedPlayer) deleteReport(selectedPlayer);
-    hideConfirm();
+    if (selectedPlayer) {
+        deleteReport(selectedPlayer);
+        hideConfirm();
+    }
 });
-
 confirmNo.addEventListener("click", hideConfirm);
 
-document.addEventListener("keydown", e => {
+// ESC để tắt popup
+document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideConfirm();
 });
 
+// Tự refresh mỗi 10 giây
 setInterval(loadReports, 10000);
+
+// Load ban đầu
 loadReports();
