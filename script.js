@@ -15,21 +15,23 @@ function formatDate(ts) {
     return d.toLocaleString();
 }
 
-// Lấy UserID từ username
+// Lấy UserID từ username (API mới)
 async function getUserId(username) {
     try {
-        const res = await fetch(`https://api.roblox.com/users/get-by-username?username=${username}`);
+        const res = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=1`);
         const json = await res.json();
-        if (json && json.Id) return json.Id;
+        if (json && json.data && json.data.length > 0) {
+            return json.data[0].id;
+        }
         return null;
     } catch {
         return null;
     }
 }
 
-// Lấy Avatar từ UserID (tròn)
+// Lấy avatar tròn từ UserID
 function getAvatarUrl(userId) {
-    return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
+    return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
 }
 
 // Xóa report
@@ -65,7 +67,7 @@ async function renderReports(data) {
     for (const playerName of Object.keys(data)) {
         const report = data[playerName];
         const userId = await getUserId(playerName);
-        const avatarUrl = userId ? getAvatarUrl(userId) : "";
+        const avatarUrl = userId ? getAvatarUrl(userId) : "https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png"; // fallback avatar
 
         const card = document.createElement("div");
         card.className = "card";
@@ -87,9 +89,10 @@ async function renderReports(data) {
     }
 }
 
-// Load reports
+// Fetch reports
 async function loadReports() {
     container.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
+
     try {
         const res = await fetch(API_URL);
         const json = await res.json();
@@ -108,12 +111,12 @@ confirmYes.addEventListener("click", () => {
 });
 confirmNo.addEventListener("click", hideConfirm);
 
-// ESC để đóng popup
+// ESC để tắt popup
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideConfirm();
 });
 
-// Refresh mỗi 10 giây
+// Tự refresh mỗi 10 giây
 setInterval(loadReports, 10000);
 
 // Load ban đầu
