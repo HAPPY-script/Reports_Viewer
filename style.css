@@ -9,6 +9,7 @@ body {
 }
 
 .header {
+    position: relative;
     text-align: center;
     padding: 30px 10px;
     background: #15151d;
@@ -23,8 +24,32 @@ body {
 
 .header p {
     opacity: 0.7;
+    margin: 6px 0 0 0;
 }
 
+/* Reload button in top-right of header */
+.reload-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.18s;
+    backdrop-filter: blur(4px);
+}
+.reload-btn:hover {
+    transform: translateY(-2px);
+    background: rgba(60,60,255,0.08);
+    border-color: #3a3aff;
+    box-shadow: 0 6px 18px rgba(58,58,255,0.08);
+}
+
+/* Container */
 .container {
     max-width: 900px;
     margin: 40px auto;
@@ -34,7 +59,7 @@ body {
 .loading {
     text-align: center;
     padding: 20px;
-    opacity: 0.6;
+    opacity: 0.8;
 }
 
 .card {
@@ -63,6 +88,8 @@ body {
 .card .message {
     font-size: 15px;
     opacity: 0.85;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .timestamp {
@@ -80,13 +107,14 @@ body {
     height: 100%;
     backdrop-filter: blur(4px);
     background: rgba(0,0,0,0.7);
-    display: flex;
+    display: none;
     justify-content: center;
     align-items: center;
     z-index: 1000;
-    opacity: 0;
-    pointer-events: none;
-    transition: 0.3s;
+}
+
+.popup.show {
+    display: flex;
 }
 
 .popup-content {
@@ -124,26 +152,10 @@ body {
     box-shadow: 0 0 10px rgba(60, 60, 255, 0.25);
 }
 
-#confirm-yes:hover {
-    background: #5555ff;
-    box-shadow: 0 0 16px rgba(90, 90, 255, 0.45);
-}
-
 #confirm-no {
     background: #ff3a3a;
     color: white;
     box-shadow: 0 0 10px rgba(255, 60, 60, 0.25);
-}
-
-#confirm-no:hover {
-    background: #ff5555;
-    box-shadow: 0 0 16px rgba(255, 90, 90, 0.45);
-}
-
-/* Show popup */
-.popup.show {
-    opacity: 1;
-    pointer-events: auto;
 }
 
 .top-section {
@@ -159,6 +171,7 @@ body {
     margin-right: 15px;
     background: #000;
     border: 2px solid #3a3aff;
+    object-fit: cover;
 }
 
 .info {
