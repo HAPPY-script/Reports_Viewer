@@ -216,3 +216,33 @@ document.addEventListener("keydown", (e) => {
 reloadBtn.addEventListener("click", () => {
     loadReports();
 });
+
+let cachedData = null; // lưu dữ liệu hiện tại
+
+// Hàm kiểm tra dữ liệu thay đổi
+function isDataChanged(newData) {
+    if (!cachedData) return true; // lần đầu luôn load
+    return JSON.stringify(newData) !== JSON.stringify(cachedData);
+}
+
+// Auto-check Firebase
+async function autoLoadReports(interval = 5000) {
+    try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error("Fetch failed");
+        const json = await res.json();
+
+        if (isDataChanged(json)) {
+            cachedData = json;
+            await renderReports(json);
+        }
+    } catch (err) {
+        console.error("Auto load error:", err);
+    } finally {
+        setTimeout(() => autoLoadReports(interval), interval);
+    }
+}
+
+// Gọi lần đầu và khởi động auto load
+autoLoadReports(5000); // kiểm tra mỗi 5 giây
+
