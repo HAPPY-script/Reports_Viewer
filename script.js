@@ -15,26 +15,21 @@ function formatDate(ts) {
     return d.toLocaleString();
 }
 
-// Lấy avatar Roblox từ UserID
-async function getAvatar(userId) {
-    try {
-        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`);
-        const json = await res.json();
-        return json.data && json.data[0] ? json.data[0].imageUrl : "";
-    } catch {
-        return "";
-    }
-}
-
-// Lấy UserID từ Username
+// Lấy UserID từ username
 async function getUserId(username) {
     try {
         const res = await fetch(`https://api.roblox.com/users/get-by-username?username=${username}`);
         const json = await res.json();
-        return json.Id || null;
+        if (json && json.Id) return json.Id;
+        return null;
     } catch {
         return null;
     }
+}
+
+// Lấy Avatar từ UserID (tròn)
+function getAvatarUrl(userId) {
+    return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
 }
 
 // Xóa report
@@ -70,36 +65,31 @@ async function renderReports(data) {
     for (const playerName of Object.keys(data)) {
         const report = data[playerName];
         const userId = await getUserId(playerName);
-        const avatarUrl = userId ? await getAvatar(userId) : "";
-        
+        const avatarUrl = userId ? getAvatarUrl(userId) : "";
+
         const card = document.createElement("div");
         card.className = "card";
 
         card.innerHTML = `
             <div class="top-section">
                 <img class="avatar" src="${avatarUrl}" alt="avatar">
-
                 <div class="info">
                     <div class="name">👤 ${playerName}</div>
                     <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
                 </div>
             </div>
-
             <div class="message">${report.message || "(Không có nội dung)"}</div>
-
             <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
         `;
 
         card.addEventListener("click", () => showConfirm(playerName));
-
         container.appendChild(card);
     }
 }
 
-// Fetch reports
+// Load reports
 async function loadReports() {
     container.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
-
     try {
         const res = await fetch(API_URL);
         const json = await res.json();
@@ -118,12 +108,12 @@ confirmYes.addEventListener("click", () => {
 });
 confirmNo.addEventListener("click", hideConfirm);
 
-// ESC để tắt popup
+// ESC để đóng popup
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideConfirm();
 });
 
-// Tự refresh mỗi 10 giây
+// Refresh mỗi 10 giây
 setInterval(loadReports, 10000);
 
 // Load ban đầu
