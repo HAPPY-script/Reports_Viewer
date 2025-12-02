@@ -1,3 +1,4 @@
+// script.js
 const API_BASE = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
 const API_URL = API_BASE + ".json";
 
@@ -5,33 +6,14 @@ const container = document.getElementById("report-container");
 const popup = document.getElementById("confirm-popup");
 const confirmYes = document.getElementById("confirm-yes");
 const confirmNo = document.getElementById("confirm-no");
+const reloadBtn = document.getElementById("reload-btn");
 
 let selectedPlayer = null;
-const avatarCache = {}; // cache userId -> avatarUrl
 
-// Tạo nút Reload ở góc trên
-function createReloadButton() {
-    let btn = document.getElementById("reload-button");
-    if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "reload-button";
-        btn.textContent = "🔄 Reload";
-        btn.style.position = "fixed";
-        btn.style.top = "15px";
-        btn.style.right = "15px";
-        btn.style.zIndex = 2000;
-        btn.style.padding = "10px 15px";
-        btn.style.background = "#3a3aff";
-        btn.style.color = "white";
-        btn.style.border = "none";
-        btn.style.borderRadius = "10px";
-        btn.style.cursor = "pointer";
-        btn.addEventListener("click", loadReports);
-        document.body.appendChild(btn);
-    }
-}
+// cache: userId -> promise resolving to imageUrl (so we don't fetch same thumbnail twice)
+const avatarPromiseCache = {};
 
-// Format timestamp
+// Format timestamp (Lua lưu ms: os.time()*1000)
 function formatDate(ts) {
     if (!ts) return "";
     const d = new Date(Number(ts));
@@ -39,7 +21,17 @@ function formatDate(ts) {
     return d.toLocaleString();
 }
 
-// Nếu cần tìm userId từ username (backup only)
+// Escape HTML to avoid XSS
+function escapeHtml(unsafe) {
+    return String(unsafe || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Lấy userId từ username (backup)
 async function getUserIdFromUsername(username) {
     try {
         const res = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=1`);
@@ -54,49 +46,46 @@ async function getUserIdFromUsername(username) {
     }
 }
 
-// Lấy avatar chuẩn từ Roblox Thumbnails API
-async function getAvatarUrl(userId) {
+// Lấy imageUrl thumbnail chính xác từ Roblox thumbnails API
+// Trả về string imageUrl hoặc null
+async function fetchAvatarImageUrl(userId, size = "150x150") {
     if (!userId) return null;
-    if (avatarCache[userId]) return avatarCache[userId];
 
-    try {
-        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`);
-        if (!res.ok) throw new Error("Failed to get avatar");
-        const json = await res.json();
-        if (json && json.data && json.data[0] && json.data[0].imageUrl) {
-            const url = json.data[0].imageUrl;
-            avatarCache[userId] = url;
-            return url;
+    // nếu đã có promise trong cache thì trả lại
+    if (avatarPromiseCache[userId]) {
+        return avatarPromiseCache[userId];
+    }
+
+    const p = (async () => {
+        try {
+            // endpoint trả về JSON { data: [{ targetId, state, imageUrl, ...}] }
+            const url = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=${size}&format=Png&isCircular=true`;
+            const res = await fetch(url);
+            if (!res.ok) {
+                // fallback: thử headshot trực tiếp
+                return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
+            }
+            const json = await res.json();
+            if (json && json.data && json.data.length > 0 && json.data[0].state === "Completed" && json.data[0].imageUrl) {
+                return json.data[0].imageUrl;
+            } else if (json && json.data && json.data.length > 0 && json.data[0].imageUrl) {
+                // nếu state không phải Completed nhưng imageUrl có (thường vẫn ok)
+                return json.data[0].imageUrl;
+            } else {
+                // fallback image
+                return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
+            }
+        } catch (e) {
+            // fallback
+            return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
         }
-        return null;
-    } catch {
-        return null;
-    }
+    })();
+
+    avatarPromiseCache[userId] = p;
+    return p;
 }
 
-// Xóa report
-async function deleteReport(playerName) {
-    const deleteURL = `${API_BASE}/${encodeURIComponent(playerName)}.json`;
-    try {
-        const res = await fetch(deleteURL, { method: "DELETE" });
-        if (!res.ok) throw new Error("delete failed");
-        await loadReports();
-    } catch (err) {
-        alert("Không thể xóa report!");
-    }
-}
-
-// Popup
-function showConfirm(playerName) {
-    selectedPlayer = playerName;
-    popup.classList.add("show");
-}
-function hideConfirm() {
-    selectedPlayer = null;
-    popup.classList.remove("show");
-}
-
-// Tạo thẻ card cho 1 report
+// Create a card element
 function createCard(playerKey, report, avatarUrl, userId) {
     const card = document.createElement("div");
     card.className = "card";
@@ -104,9 +93,10 @@ function createCard(playerKey, report, avatarUrl, userId) {
     const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
     const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
 
+    // Build inner HTML
     card.innerHTML = `
         <div class="top-section">
-            <img class="avatar" src="${avatarUrl || 'https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png'}" alt="avatar">
+            <img class="avatar" src="${avatarUrl}" alt="avatar" onerror="this.onerror=null;this.src='https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png'">
             <div class="info">
                 <div class="name">👤 ${escapeHtml(playerKey)}</div>
                 <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
@@ -120,17 +110,7 @@ function createCard(playerKey, report, avatarUrl, userId) {
     return card;
 }
 
-// escape HTML để tránh XSS
-function escapeHtml(unsafe) {
-    return String(unsafe)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-// Render tất cả reports
+// Render reports (sử dụng avatarImageUrlResolved nếu có)
 async function renderReports(data) {
     container.innerHTML = "";
 
@@ -143,19 +123,31 @@ async function renderReports(data) {
     for (const playerKey of keys) {
         const report = data[playerKey];
 
+        // userId có thể đã được lưu trong object (đúng như Lua gửi)
         let userId = (report && report.userId) ? report.userId : null;
+
+        // nếu không có userId, try tìm theo username
         if (!userId) {
             userId = await getUserIdFromUsername(playerKey);
         }
 
-        const avatarUrl = await getAvatarUrl(userId);
+        // lấy imageUrl chính xác bằng thumbnails API
+        let avatarUrl = 'https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png'; // default
+        if (userId) {
+            try {
+                const url = await fetchAvatarImageUrl(userId, "150x150");
+                if (url) avatarUrl = url;
+            } catch (e) {
+                // ignore, fallback sẽ dùng default
+            }
+        }
 
         const card = createCard(playerKey, report, avatarUrl, userId);
         container.appendChild(card);
     }
 }
 
-// Fetch reports
+// Load reports (khi người dùng bấm Reload)
 async function loadReports() {
     container.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
@@ -169,7 +161,29 @@ async function loadReports() {
     }
 }
 
-// Popup buttons
+// Delete report
+async function deleteReport(playerName) {
+    const deleteURL = `${API_BASE}/${encodeURIComponent(playerName)}.json`;
+    try {
+        const res = await fetch(deleteURL, { method: "DELETE" });
+        if (!res.ok) throw new Error("delete failed");
+        await loadReports();
+    } catch (err) {
+        alert("Không thể xóa report!");
+    }
+}
+
+// Popup controls
+function showConfirm(playerName) {
+    selectedPlayer = playerName;
+    popup.classList.add("show");
+}
+function hideConfirm() {
+    selectedPlayer = null;
+    popup.classList.remove("show");
+}
+
+// Hook popup buttons
 confirmYes.addEventListener("click", () => {
     if (selectedPlayer) {
         deleteReport(selectedPlayer);
@@ -177,11 +191,11 @@ confirmYes.addEventListener("click", () => {
     }
 });
 confirmNo.addEventListener("click", hideConfirm);
-
-// ESC để tắt popup
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideConfirm();
 });
 
-// Tạo nút reload
-createReloadButton();
+// Reload button (người dùng phải bấm để load)
+reloadBtn.addEventListener("click", () => {
+    loadReports();
+});
