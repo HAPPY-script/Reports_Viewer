@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Happy Script - Reports Viewer</title>
     <link rel="icon" href="icon.png" type="image/png">
     <link rel="stylesheet" href="style.css">
@@ -12,14 +12,17 @@
 <div class="header">
     <h1>📄 Reports Viewer</h1>
     <p>Nhận tất cả báo cáo từ HAPPY script</p>
+
+    <!-- Reload button -->
+    <button id="reload-btn" class="reload-btn" title="Reload dữ liệu">⟳ Reload</button>
 </div>
 
 <div id="report-container" class="container">
-    <div class="loading">Đang tải dữ liệu...</div>
+    <div class="loading">Nhấn <strong>Reload</strong> để nạp dữ liệu.</div>
 </div>
 
 <!-- Confirmation Popup -->
-<div id="confirm-popup" class="popup hidden">
+<div id="confirm-popup" class="popup">
     <div class="popup-content">
         <h2>Bạn có muốn xóa Report này?</h2>
         <div class="popup-buttons">
