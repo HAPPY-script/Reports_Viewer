@@ -6,7 +6,7 @@ const popup = document.getElementById("confirm-popup");
 const confirmYes = document.getElementById("confirm-yes");
 const confirmNo = document.getElementById("confirm-no");
 
-let selectedPlayer = null; // player đang chọn để xóa
+let selectedPlayer = null;
 
 // Format timestamp
 function formatDate(ts) {
@@ -15,7 +15,12 @@ function formatDate(ts) {
     return d.toLocaleString();
 }
 
-// Xóa report của player
+// Get Roblox Avatar API
+function getAvatarURL(userId) {
+    return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
+}
+
+// Delete report
 async function deleteReport(playerName) {
     const deleteURL = `${API_BASE}/${playerName}.json`;
     try {
@@ -27,77 +32,78 @@ async function deleteReport(playerName) {
     }
 }
 
-// Hiện popup xác nhận
+// Popup show
 function showConfirm(playerName) {
     selectedPlayer = playerName;
     popup.classList.add("show");
 }
 
-// Ẩn popup
+// Hide popup
 function hideConfirm() {
     selectedPlayer = null;
     popup.classList.remove("show");
 }
 
-// Render reports
+// Render UI
 function renderReports(data) {
-    container.innerHTML = ""; 
+    container.innerHTML = "";
 
     if (!data) {
         container.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
 
-    Object.keys(data).forEach(playerName => {
-        const report = data[playerName];
+    Object.keys(data).forEach(key => {
+        const report = data[key];
+        const userId = report.userId || 0;
+        const avatarURL = getAvatarURL(userId);
 
         const card = document.createElement("div");
         card.className = "card";
 
         card.innerHTML = `
-            <div class="name">👤 ${playerName}</div>
+            <div class="top-section">
+                <img src="${avatarURL}" class="avatar">
+                <div class="info">
+                    <div class="name">👤 ${report.playerName || key}</div>
+                    <div class="userid">ID: ${userId}</div>
+                </div>
+            </div>
+
             <div class="message">${report.message || "(Không có nội dung)"}</div>
-            <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
+
+            <div class="timestamp">⏱ ${formatDate(report.timestamp)}</div>
         `;
 
-        card.addEventListener("click", () => showConfirm(playerName));
-
+        card.addEventListener("click", () => showConfirm(key));
         container.appendChild(card);
     });
 }
 
-// Fetch reports
+// Fetch
 async function loadReports() {
     container.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
 
     try {
         const res = await fetch(API_URL);
         const json = await res.json();
-
         renderReports(json);
-    } catch (error) {
+    } catch (err) {
         container.innerHTML = "<div class='loading'>Lỗi tải dữ liệu.</div>";
-        console.error(error);
+        console.error(err);
     }
 }
 
-// Popup button events
 confirmYes.addEventListener("click", () => {
-    if (selectedPlayer) {
-        deleteReport(selectedPlayer);
-        hideConfirm();
-    }
+    if (selectedPlayer) deleteReport(selectedPlayer);
+    hideConfirm();
 });
 
 confirmNo.addEventListener("click", hideConfirm);
 
-// Esc key để hủy popup
-document.addEventListener("keydown", (e) => {
+document.addEventListener("keydown", e => {
     if (e.key === "Escape") hideConfirm();
 });
 
-// Refresh mỗi 10 giây
 setInterval(loadReports, 10000);
-
-// Load ban đầu
 loadReports();
