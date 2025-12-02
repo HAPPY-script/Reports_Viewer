@@ -46,38 +46,26 @@ async function getUserIdFromUsername(username) {
     }
 }
 
-// Lấy imageUrl thumbnail chính xác từ Roblox thumbnails API
-// Trả về string imageUrl hoặc null
+// sửa fetchAvatarImageUrl: dùng roproxy.com
 async function fetchAvatarImageUrl(userId, size = "150x150") {
     if (!userId) return null;
-
-    // nếu đã có promise trong cache thì trả lại
-    if (avatarPromiseCache[userId]) {
-        return avatarPromiseCache[userId];
-    }
+    if (avatarPromiseCache[userId]) return avatarPromiseCache[userId];
 
     const p = (async () => {
         try {
-            // endpoint trả về JSON { data: [{ targetId, state, imageUrl, ...}] }
-            const url = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=${size}&format=Png&isCircular=true`;
+            const url = `https://thumbnails.roproxy.com/v1/users/avatar-headshot?userIds=${userId}&size=${size}&format=Png&isCircular=false`;
             const res = await fetch(url);
-            if (!res.ok) {
-                // fallback: thử headshot trực tiếp
-                return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
-            }
+            if (!res.ok) throw new Error("bad response");
             const json = await res.json();
-            if (json && json.data && json.data.length > 0 && json.data[0].state === "Completed" && json.data[0].imageUrl) {
-                return json.data[0].imageUrl;
-            } else if (json && json.data && json.data.length > 0 && json.data[0].imageUrl) {
-                // nếu state không phải Completed nhưng imageUrl có (thường vẫn ok)
-                return json.data[0].imageUrl;
+            const d = json.data && json.data[0];
+            if (d && d.imageUrl) {
+                return d.imageUrl;
             } else {
-                // fallback image
-                return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
+                throw new Error("no imageUrl");
             }
         } catch (e) {
-            // fallback
-            return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=Png`;
+            // fallback generic / default avatar
+            return `https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png`;
         }
     })();
 
