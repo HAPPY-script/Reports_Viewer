@@ -7,39 +7,43 @@ const confirmYes = document.getElementById("confirm-yes");
 const confirmNo = document.getElementById("confirm-no");
 
 let selectedPlayer = null;
+const avatarCache = {}; // cache userId -> avatarUrl
 
-// Format timestamp
+// Format timestamp (nhớ Lua lưu ms: os.time()*1000)
 function formatDate(ts) {
     if (!ts) return "";
-    const d = new Date(ts);
+    const d = new Date(Number(ts));
+    if (isNaN(d.getTime())) return "";
     return d.toLocaleString();
 }
 
-// Lấy UserID từ username (API mới)
-async function getUserId(username) {
+// Nếu cần tìm userId từ username (backup only)
+async function getUserIdFromUsername(username) {
     try {
         const res = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=1`);
+        if (!res.ok) return null;
         const json = await res.json();
         if (json && json.data && json.data.length > 0) {
             return json.data[0].id;
         }
         return null;
-    } catch {
+    } catch (e) {
         return null;
     }
 }
 
-// Lấy avatar tròn từ UserID
-function getAvatarUrl(userId) {
-    return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
+// Trả về URL ảnh avatar headshot trực tiếp (kết quả là hình, không phải JSON)
+function headshotImageUrl(userId, size = 150) {
+    return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=${size}&height=${size}&format=Png`;
 }
 
 // Xóa report
 async function deleteReport(playerName) {
-    const deleteURL = `${API_BASE}/${playerName}.json`;
+    const deleteURL = `${API_BASE}/${encodeURIComponent(playerName)}.json`;
     try {
-        await fetch(deleteURL, { method: "DELETE" });
-        loadReports();
+        const res = await fetch(deleteURL, { method: "DELETE" });
+        if (!res.ok) throw new Error("delete failed");
+        await loadReports();
     } catch (err) {
         alert("Không thể xóa report!");
     }
@@ -55,36 +59,78 @@ function hideConfirm() {
     popup.classList.remove("show");
 }
 
-// Render reports
+// Tạo thẻ card cho 1 report
+function createCard(playerKey, report, avatarUrl, userId) {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
+    const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
+
+    card.innerHTML = `
+        <div class="top-section">
+            <img class="avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png'">
+            <div class="info">
+                <div class="name">👤 ${escapeHtml(playerKey)}</div>
+                <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
+            </div>
+        </div>
+        <div class="message">${safeMessage}</div>
+        <div class="timestamp">⏱ ${tsText}</div>
+    `;
+
+    card.addEventListener("click", () => showConfirm(playerKey));
+    return card;
+}
+
+// escape HTML để tránh XSS (dù dữ liệu từ Firebase không mong đợi HTML)
+function escapeHtml(unsafe) {
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Render tất cả reports
 async function renderReports(data) {
     container.innerHTML = "";
 
-    if (!data) {
+    if (!data || Object.keys(data).length === 0) {
         container.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
 
-    for (const playerName of Object.keys(data)) {
-        const report = data[playerName];
-        const userId = await getUserId(playerName);
-        const avatarUrl = userId ? getAvatarUrl(userId) : "https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png"; // fallback avatar
+    // Duyệt từng report
+    const keys = Object.keys(data);
+    for (const playerKey of keys) {
+        const report = data[playerKey];
 
-        const card = document.createElement("div");
-        card.className = "card";
+        // Nếu Firebase đã lưu userId trong object report => dùng luôn
+        let userId = (report && report.userId) ? report.userId : null;
 
-        card.innerHTML = `
-            <div class="top-section">
-                <img class="avatar" src="${avatarUrl}" alt="avatar">
-                <div class="info">
-                    <div class="name">👤 ${playerName}</div>
-                    <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
-                </div>
-            </div>
-            <div class="message">${report.message || "(Không có nội dung)"}</div>
-            <div class="timestamp">⏱ ${formatDate(report.timestamp || null)}</div>
-        `;
+        // Nếu không có userId trong report thì thử tìm theo username (chỉ làm khi cần)
+        if (!userId) {
+            // để tránh gọi API quá nhiều lần, chỉ gọi khi bắt buộc
+            userId = await getUserIdFromUsername(playerKey);
+        }
 
-        card.addEventListener("click", () => showConfirm(playerName));
+        // Lấy avatar URL (dùng cache nếu có)
+        let avatarUrl = null;
+        if (userId) {
+            if (avatarCache[userId]) {
+                avatarUrl = avatarCache[userId];
+            } else {
+                avatarUrl = headshotImageUrl(userId, 150);
+                avatarCache[userId] = avatarUrl;
+            }
+        } else {
+            // fallback generic avatar (roblox userId=1)
+            avatarUrl = 'https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png';
+        }
+
+        const card = createCard(playerKey, report, avatarUrl, userId);
         container.appendChild(card);
     }
 }
@@ -95,10 +141,12 @@ async function loadReports() {
 
     try {
         const res = await fetch(API_URL);
+        if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
-        renderReports(json);
-    } catch {
+        await renderReports(json);
+    } catch (err) {
         container.innerHTML = "<div class='loading'>Lỗi tải dữ liệu.</div>";
+        console.error(err);
     }
 }
 
