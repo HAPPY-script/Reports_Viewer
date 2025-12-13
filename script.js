@@ -26,11 +26,14 @@ const clearFilterBtn = document.getElementById("clear-filter");
 const reportsCountEl = document.getElementById("reports-count");
 const membersCountEl = document.getElementById("members-count");
 
-// Reply modal elements
+// Reply modal elements (safe: allow missing modal in HTML)
 const replyModal = document.getElementById("reply-modal");
 const replyText = document.getElementById("reply-text");
 const replySend = document.getElementById("reply-send");
 const replyCancel = document.getElementById("reply-cancel");
+
+// confirm title (safe grab): prefer #confirm-title else first H2 inside popup
+const confirmTitleEl = document.getElementById("confirm-title") || (popup ? popup.querySelector("h2") : null);
 
 const memberModal = document.getElementById("member-modal");
 const memberModalClose = document.getElementById("member-modal-close");
@@ -275,7 +278,12 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         // ask confirm
         selectedPlayer = playerKey;
         pendingConfirmAction = "delete-as-respond";
-        document.getElementById("confirm-title").textContent = "This will send a default admin reply. Continue?";
+        if (confirmTitleEl) {
+            confirmTitleEl.textContent = "This will send a default admin reply. Continue?";
+        } else if (popup) {
+            const h = popup.querySelector("h2");
+            if (h) h.textContent = "This will send a default admin reply. Continue?";
+        }
         popup.classList.add("show");
     });
 
@@ -670,27 +678,47 @@ confirmNo.addEventListener("click", hideConfirm);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideConfirm(); });
 
 // ---------- Reply modal ----------
+// openReplyModal / closeReplyModal with fallbacks
 function openReplyModal(playerName, report) {
     selectedPlayer = playerName;
+    if (!replyModal || !replyText || !replySend || !replyCancel) {
+        // fallback: if admin UI not present, use a simple prompt to send response
+        const text = prompt(`Enter response for ${playerName}:`);
+        if (text && text.trim()) {
+            // call respondToReport if exists (async)
+            if (typeof respondToReport === "function") {
+                respondToReport(playerName, text.trim()).catch(()=>{/* silent */});
+            }
+        }
+        selectedPlayer = null;
+        return;
+    }
     replyText.value = "";
     replyModal.classList.add("show");
 }
+
 function closeReplyModal() {
-    replyModal.classList.remove("show");
-    replyText.value = "";
+    if (replyModal) replyModal.classList.remove("show");
+    if (replyText) replyText.value = "";
     selectedPlayer = null;
 }
-replyCancel.addEventListener("click", closeReplyModal);
-replyModal.addEventListener("click", (ev) => {
+
+// safe event wiring only when elements exist
+if (replyCancel) replyCancel.addEventListener("click", closeReplyModal);
+if (replyModal) replyModal.addEventListener("click", (ev) => {
     if (ev.target === replyModal) closeReplyModal();
 });
-replySend.addEventListener("click", async () => {
-    const text = (replyText.value || "").trim();
+if (replySend) replySend.addEventListener("click", async () => {
+    const text = (replyText && replyText.value || "").trim();
     if (!text) { alert("Please enter a response."); return; }
     if (!selectedPlayer) { alert("No player selected."); closeReplyModal(); return; }
-    const ok = await respondToReport(selectedPlayer, text);
-    if (ok) {
-        closeReplyModal();
+    // call respondToReport (exists in your script)
+    try {
+        const ok = await respondToReport(selectedPlayer, text);
+        if (ok) closeReplyModal();
+    } catch (e) {
+        // silent fail / show message
+        alert("Failed to send response.");
     }
 });
 
