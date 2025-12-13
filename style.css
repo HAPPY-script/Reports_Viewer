@@ -435,3 +435,72 @@ body {
 @media (max-width:640px) {
     .num-input { min-width:56px; padding:6px 8px; }
 }
+
+/* action buttons in each report card */
+.card .card-actions {
+    display:flex;
+    gap:8px;
+    margin-top:12px;
+    justify-content:flex-end;
+}
+.card .card-actions button {
+    padding:8px 10px;
+    border-radius:8px;
+    border:none;
+    cursor:pointer;
+    font-weight:700;
+    font-family:inherit;
+}
+.card .btn-respond {
+    background: #3a3aff;
+    color:white;
+    border: 1px solid rgba(58,58,255,0.12);
+}
+.card .btn-delete {
+    background: #ff3a3a;
+    color:white;
+    border: 1px solid rgba(255,58,58,0.12);
+}
+
+/* waiting (responded) state */
+.card.waiting {
+    opacity: 0.55;
+    filter: grayscale(18%);
+    pointer-events: auto; /* allow clicks for view but action buttons disabled */
+}
+
+/* responded label */
+.card .admin-response {
+    margin-top:10px;
+    padding:10px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02));
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.03);
+    color: #e6f4ff;
+    font-size: 14px;
+    white-space: pre-wrap;
+}
+
+/* small meta line for "waiting until user delete / expires" */
+.card .waiting-meta {
+    margin-top:8px;
+    font-size:12px;
+    opacity:0.7;
+}
+
+/* disabled button look */
+.card .btn-disabled {
+    opacity:0.6;
+    cursor: not-allowed;
+    filter: grayscale(40%);
+}
+
+/* Reply modal overrides (keeps consistency) */
+.popup .reply-note {
+    margin-bottom:8px;
+    font-size:13px;
+    opacity:0.75;
+}
+
+/* make number column spacing not break when waiting */
+.line-number { min-width:36px; }
