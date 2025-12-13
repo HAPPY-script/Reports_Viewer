@@ -10,16 +10,38 @@
 <body>
 
 <div class="header">
-    <h1>📄 Reports Viewer</h1>
-    <p>Nhận tất cả báo cáo từ HAPPY script</p>
+    <div class="header-top">
+      <div class="brand">
+        <h1>📄 Reports Viewer</h1>
+        <p>Nhận tất cả báo cáo từ HAPPY script</p>
+      </div>
 
-    <!-- Reload button -->
-    <button id="reload-btn" class="reload-btn" title="Reload dữ liệu">⟳ Reload</button>
+      <div class="controls">
+        <button id="btn-reports" class="tab-btn active">Reports</button>
+        <button id="btn-members" class="tab-btn">Members</button>
+
+        <!-- Reload button -->
+        <button id="reload-btn" class="reload-btn" title="Reload dữ liệu">⟳ Reload</button>
+      </div>
+    </div>
 </div>
 
-<div id="report-container" class="container">
-    <div class="loading">Nhấn <strong>Reload</strong> để nạp dữ liệu.</div>
-</div>
+<main class="main-area">
+    <!-- Pages container: fade/slide transition between pages -->
+    <div id="pages" class="pages">
+        <section id="page-reports" class="page active">
+            <div id="report-container" class="container">
+                <div class="loading">Nhấn <strong>Reload</strong> để nạp dữ liệu.</div>
+            </div>
+        </section>
+
+        <section id="page-members" class="page">
+            <div id="member-container" class="container">
+                <div class="loading">Nhấn <strong>Members</strong> để nạp danh sách thành viên.</div>
+            </div>
+        </section>
+    </div>
+</main>
 
 <!-- Confirmation Popup -->
 <div id="confirm-popup" class="popup">
