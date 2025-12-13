@@ -418,3 +418,20 @@ body {
     .line-number { display:none; }
     .search-input { min-width: 140px; }
 }
+
+/* number inputs for min/max */
+.num-input {
+    padding:8px 10px;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,0.06);
+    background:#0f1014;
+    color:white;
+    outline:none;
+    min-width:64px;
+    text-align:center;
+    font-weight:600;
+}
+/* small arrow separator wrapper already inline in HTML; adjust responsive */
+@media (max-width:640px) {
+    .num-input { min-width:56px; padding:6px 8px; }
+}
