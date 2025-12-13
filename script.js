@@ -21,8 +21,7 @@ const pageMembers = document.getElementById("page-members");
 
 const searchReportsInput = document.getElementById("search-reports");
 const searchMembersInput = document.getElementById("search-members");
-const filterGamesMinInput = document.getElementById("filter-games-min");
-const filterGamesMaxInput = document.getElementById("filter-games-max");
+const filterGamesInput = document.getElementById("filter-games");
 const applyFilterBtn = document.getElementById("apply-filter");
 const clearFilterBtn = document.getElementById("clear-filter");
 const reportsCountEl = document.getElementById("reports-count");
@@ -154,68 +153,52 @@ async function filterReportsObject(obj, query) {
 
 // Filter members by search query and gamesCount filter
 // query can match username, userId, game name (key), or placeId digits
-function filterMembersObject(obj, query, minGames, maxGames) {
+function filterMembersObject(obj, query, gamesCountFilter) {
     if (!obj) return obj;
-
     const q = (query || "").trim().toLowerCase();
     const numeric = isNumericString(q) ? q : null;
 
-    const min = Number.isFinite(minGames) ? minGames : -Infinity;
-    const max = Number.isFinite(maxGames) ? maxGames : Infinity;
-
     const out = {};
-
     for (const username of Object.keys(obj)) {
         const data = obj[username] || {};
         const uid = data.ID ? String(data.ID) : "";
         const gamesObj = data.Games || {};
         const gameKeys = Object.keys(gamesObj);
-        const gameCount = gameKeys.length;
 
-        // RANGE CHECK
-        if (gameCount < min || gameCount > max) continue;
+        // games count filter exact match (if provided)
+        if (gamesCountFilter !== null && gamesCountFilter !== undefined && gamesCountFilter !== "") {
+            const desired = Number(gamesCountFilter);
+            if (Number.isFinite(desired)) {
+                if (gameKeys.length !== desired) continue;
+            }
+        }
 
-        // no search text
+        // if no query -> include
         if (!q) {
             out[username] = data;
             continue;
         }
 
-        // username / userId
+        // match username or uid
         if (username.toLowerCase().includes(q) || uid.includes(q)) {
             out[username] = data;
             continue;
         }
 
-        // game name / placeId
+        // match inside game keys (game name or id)
         let matched = false;
         for (const gk of gameKeys) {
-            const gl = gk.toLowerCase();
-            if (gl.includes(q)) { matched = true; break; }
-
+            const gkl = gk.toLowerCase();
+            if (gkl.includes(q)) { matched = true; break; }
             if (numeric) {
-                const digits = gk.match(/\d{4,}/g);
-                if (digits && digits.join(" ").includes(numeric)) {
-                    matched = true;
-                    break;
-                }
+                // check digits in key (placeId)
+                const digits = gk.match(/(\d{4,})/g);
+                if (digits && digits.join(" ").includes(numeric)) { matched = true; break; }
             }
         }
-
         if (matched) out[username] = data;
     }
-
     return out;
-}
-
-function getGamesRange() {
-    const minVal = parseInt(filterGamesMinInput.value);
-    const maxVal = parseInt(filterGamesMaxInput.value);
-
-    return {
-        min: Number.isFinite(minVal) ? minVal : null,
-        max: Number.isFinite(maxVal) ? maxVal : null
-    };
 }
 
 // ---------- Rendering with numbering ----------
@@ -497,8 +480,8 @@ async function loadMembers() {
         const json = await res.json();
         cachedMembers = json || {};
         const q = (searchMembersInput.value || "").trim();
-        const { min, max } = getGamesRange();
-        const filtered = filterMembersObject(cachedMembers, q, min, max);
+        const filterVal = (filterGamesInput.value || "").trim();
+        const filtered = filterMembersObject(cachedMembers, q, filterVal === "" ? null : filterVal);
         await renderMembers(filtered);
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
     } catch (err) {
@@ -617,10 +600,10 @@ const onSearchReports = debounce(async () => {
 
 const onSearchMembers = debounce(async () => {
     const q = (searchMembersInput.value || "").trim();
-    const { min, max } = getGamesRange();
-    const filtered = filterMembersObject(cachedMembers || {}, q, min, max);
+    const filterVal = (filterGamesInput.value || "").trim();
+    const filtered = filterMembersObject(cachedMembers || {}, q, filterVal === "" ? null : filterVal);
     await renderMembers(filtered);
-    membersCountEl.textContent = Object.keys(filtered).length + " member(s)";
+    membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 }, 300);
 
 searchReportsInput.addEventListener("input", onSearchReports);
@@ -629,14 +612,13 @@ searchMembersInput.addEventListener("input", onSearchMembers);
 // filter apply/clear
 applyFilterBtn.addEventListener("click", async () => {
     const q = (searchMembersInput.value || "").trim();
-    const { min, max } = getGamesRange();
-    const filtered = filterMembersObject(cachedMembers || {}, q, min, max);
+    const filterVal = (filterGamesInput.value || "").trim();
+    const filtered = filterMembersObject(cachedMembers || {}, q, filterVal === "" ? null : filterVal);
     await renderMembers(filtered);
-    membersCountEl.textContent = Object.keys(filtered).length + " member(s)";
+    membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 });
 clearFilterBtn.addEventListener("click", async () => {
-    filterGamesMinInput.value = "";
-    filterGamesMaxInput.value = "";
+    filterGamesInput.value = "";
     searchMembersInput.value = "";
     await loadMembers();
 });
