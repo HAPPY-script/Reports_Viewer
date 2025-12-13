@@ -42,7 +42,14 @@
         <section id="page-members" class="page">
             <div class="page-controls">
                 <input id="search-members" class="search-input" placeholder="Tìm theo username, userId, tên game, hoặc placeId..." />
-                <input id="filter-games" class="filter-input" placeholder="Lọc: số lượng games (ví dụ: 4)" />
+
+                <!-- range filter: min / max -->
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input id="filter-games-min" class="num-input" placeholder="Min" inputmode="numeric" />
+                  <div style="color:rgba(220,220,255,0.6); font-size:13px;">→</div>
+                  <input id="filter-games-max" class="num-input" placeholder="Max" inputmode="numeric" />
+                </div>
+
                 <button id="apply-filter" class="small-btn">Áp dụng</button>
                 <button id="clear-filter" class="small-btn alt">Xóa</button>
                 <div id="members-count" class="small-muted"></div>
