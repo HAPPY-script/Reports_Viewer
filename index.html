@@ -30,12 +30,23 @@
     <!-- Pages container: fade/slide transition between pages -->
     <div id="pages" class="pages">
         <section id="page-reports" class="page active">
+            <div class="page-controls">
+                <input id="search-reports" class="search-input" placeholder="Tìm theo username, userId, hoặc nội dung report..." />
+                <div id="reports-count" class="small-muted"></div>
+            </div>
             <div id="report-container" class="container">
                 <div class="loading">Nhấn <strong>Reload</strong> để nạp dữ liệu.</div>
             </div>
         </section>
 
         <section id="page-members" class="page">
+            <div class="page-controls">
+                <input id="search-members" class="search-input" placeholder="Tìm theo username, userId, tên game, hoặc placeId..." />
+                <input id="filter-games" class="filter-input" placeholder="Lọc: số lượng games (ví dụ: 4)" />
+                <button id="apply-filter" class="small-btn">Áp dụng</button>
+                <button id="clear-filter" class="small-btn alt">Xóa</button>
+                <div id="members-count" class="small-muted"></div>
+            </div>
             <div id="member-container" class="container">
                 <div class="loading">Nhấn <strong>Members</strong> để nạp danh sách thành viên.</div>
             </div>
