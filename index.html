@@ -64,12 +64,24 @@
 <!-- Confirmation Popup -->
 <div id="confirm-popup" class="popup">
     <div class="popup-content">
-        <h2>Bạn có muốn xóa Report này?</h2>
+        <h2 id="confirm-title">Bạn có muốn xóa Report này?</h2>
         <div class="popup-buttons">
             <button id="confirm-yes">Có</button>
             <button id="confirm-no">Không</button>
         </div>
     </div>
+</div>
+
+<!-- Reply modal (admin enters reply) -->
+<div id="reply-modal" class="popup">
+  <div class="popup-content" style="max-width:640px;">
+    <h2>Gửi phản hồi cho user</h2>
+    <textarea id="reply-text" rows="6" placeholder="Nhập phản hồi của bạn..." style="width:100%; padding:10px; border-radius:8px; background:#0f1014; color:white; border:1px solid rgba(255,255,255,0.06);"></textarea>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+      <button id="reply-send" class="small-btn">Gửi</button>
+      <button id="reply-cancel" class="small-btn alt">Hủy</button>
+    </div>
+  </div>
 </div>
 
 <!-- Member detail modal -->
