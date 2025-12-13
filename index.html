@@ -54,6 +54,37 @@
     </div>
 </div>
 
+<!-- Member detail modal -->
+<div id="member-modal" class="member-modal" aria-hidden="true">
+  <div class="member-modal-overlay"></div>
+  <div class="member-modal-card" role="dialog" aria-modal="true" aria-labelledby="member-modal-title">
+    <div class="member-modal-header">
+      <div class="member-modal-title" id="member-modal-title">Member</div>
+      <button id="member-modal-close" class="member-modal-close" title="Đóng">✕</button>
+    </div>
+
+    <div class="member-modal-body">
+      <div class="member-info">
+        <img id="member-avatar" class="member-avatar" src="" alt="avatar">
+        <div class="member-meta">
+          <div id="member-username" class="member-username">Username</div>
+          <div id="member-userid" class="member-userid">ID: —</div>
+          <div id="member-gamecount" class="member-gamecount">Games: 0</div>
+        </div>
+      </div>
+
+      <div class="game-list" id="game-list">
+        <!-- game items inserted here; scrollable -->
+        <div class="loading">Đang tải danh sách game...</div>
+      </div>
+    </div>
+
+    <div class="member-modal-footer">
+      <button id="member-modal-close-2" class="member-modal-close-btn">Đóng</button>
+    </div>
+  </div>
+</div>
+
 <script src="script.js"></script>
 </body>
 </html>
