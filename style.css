@@ -418,3 +418,21 @@ body {
     .line-number { display:none; }
     .search-input { min-width: 140px; }
 }
+
+/* games range filter */
+.games-range {
+    display:flex;
+    align-items:center;
+    gap:6px;
+}
+
+.filter-input.small {
+    min-width: 70px;
+    max-width: 90px;
+    text-align:center;
+}
+
+.range-sep {
+    opacity:0.6;
+    font-weight:600;
+}
