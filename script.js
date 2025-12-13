@@ -1,4 +1,4 @@
-// script.js (full update) - search, filter, numbering, modal, counts
+// script.js (update: min/max games range filter)
 
 // CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
@@ -21,7 +21,8 @@ const pageMembers = document.getElementById("page-members");
 
 const searchReportsInput = document.getElementById("search-reports");
 const searchMembersInput = document.getElementById("search-members");
-const filterGamesInput = document.getElementById("filter-games");
+const filterGamesMinInput = document.getElementById("filter-games-min");
+const filterGamesMaxInput = document.getElementById("filter-games-max");
 const applyFilterBtn = document.getElementById("apply-filter");
 const clearFilterBtn = document.getElementById("clear-filter");
 const reportsCountEl = document.getElementById("reports-count");
@@ -118,32 +119,27 @@ function showPage(page) {
 
 // ---------- Filtering/Search logic ----------
 
-// Checks for "isNumeric" string
 function isNumericString(s) {
     return /^\d+$/.test(String(s).trim());
 }
 
 // Filter reports object by query string (username, userId, message)
-// returns new object (subset)
 async function filterReportsObject(obj, query) {
     if (!query || !obj) return obj;
     const q = query.trim().toLowerCase();
     const numeric = isNumericString(q) ? q : null;
 
     const out = {};
-    // iterate keys in insertion order
     for (const key of Object.keys(obj)) {
         const r = obj[key] || {};
         const msg = (r.message || "").toString().toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
 
-        // match conditions
         let matched = false;
         if (username.includes(q)) matched = true;
         else if (msg.includes(q)) matched = true;
         else if (numeric && userIdFromReport && userIdFromReport.includes(numeric)) matched = true;
-        // if still unmatched and q numeric, attempt to check if key contains digits
         else if (numeric && key.includes(numeric)) matched = true;
 
         if (matched) out[key] = r;
@@ -151,12 +147,34 @@ async function filterReportsObject(obj, query) {
     return out;
 }
 
-// Filter members by search query and gamesCount filter
-// query can match username, userId, game name (key), or placeId digits
-function filterMembersObject(obj, query, gamesCountFilter) {
+/*
+  Filter members object by:
+    - query (username, userId, game name, placeId)
+    - minGames, maxGames (both strings/input). Behavior:
+      empty min -> -Infinity, empty max -> +Infinity
+      non-numeric inputs are ignored (treated as empty)
+      if min > max -> swap
+*/
+function filterMembersObject(obj, query, minGames, maxGames) {
     if (!obj) return obj;
     const q = (query || "").trim().toLowerCase();
-    const numeric = isNumericString(q) ? q : null;
+    const numericQuery = isNumericString(q) ? q : null;
+
+    // parse min/max
+    let min = Number.NEGATIVE_INFINITY;
+    let max = Number.POSITIVE_INFINITY;
+    if (minGames !== null && minGames !== undefined && String(minGames).trim() !== "") {
+        const v = parseInt(String(minGames).trim(), 10);
+        if (!Number.isNaN(v)) min = v;
+    }
+    if (maxGames !== null && maxGames !== undefined && String(maxGames).trim() !== "") {
+        const v = parseInt(String(maxGames).trim(), 10);
+        if (!Number.isNaN(v)) max = v;
+    }
+    // swap if user accidentally provided min>max
+    if (min > max) {
+        const t = min; min = max; max = t;
+    }
 
     const out = {};
     for (const username of Object.keys(obj)) {
@@ -164,14 +182,10 @@ function filterMembersObject(obj, query, gamesCountFilter) {
         const uid = data.ID ? String(data.ID) : "";
         const gamesObj = data.Games || {};
         const gameKeys = Object.keys(gamesObj);
+        const count = gameKeys.length;
 
-        // games count filter exact match (if provided)
-        if (gamesCountFilter !== null && gamesCountFilter !== undefined && gamesCountFilter !== "") {
-            const desired = Number(gamesCountFilter);
-            if (Number.isFinite(desired)) {
-                if (gameKeys.length !== desired) continue;
-            }
-        }
+        // check games count in range
+        if (count < min || count > max) continue;
 
         // if no query -> include
         if (!q) {
@@ -190,10 +204,9 @@ function filterMembersObject(obj, query, gamesCountFilter) {
         for (const gk of gameKeys) {
             const gkl = gk.toLowerCase();
             if (gkl.includes(q)) { matched = true; break; }
-            if (numeric) {
-                // check digits in key (placeId)
+            if (numericQuery) {
                 const digits = gk.match(/(\d{4,})/g);
-                if (digits && digits.join(" ").includes(numeric)) { matched = true; break; }
+                if (digits && digits.join(" ").includes(numericQuery)) { matched = true; break; }
             }
         }
         if (matched) out[username] = data;
@@ -202,11 +215,9 @@ function filterMembersObject(obj, query, gamesCountFilter) {
 }
 
 // ---------- Rendering with numbering ----------
-
 function makeNumberedRow(number, innerCard) {
-    // wrapper with left badge
     const wrapper = document.createElement("div");
-    wrapper.className = "card-row"; // CSS will position number & card
+    wrapper.className = "card-row";
     const badge = document.createElement("div");
     badge.className = "line-number";
     badge.textContent = number;
@@ -215,7 +226,7 @@ function makeNumberedRow(number, innerCard) {
     return wrapper;
 }
 
-// Reports: create card (index param optional)
+// Create report/member cards (same as before)...
 function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
@@ -256,21 +267,16 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         });
     }
 
-    if (index !== null) {
-        return makeNumberedRow(index, card);
-    } else {
-        return card;
-    }
+    if (index !== null) return makeNumberedRow(index, card);
+    return card;
 }
 
-// renderReports with optional filteredObject
 async function renderReports(dataObj) {
     reportContainer.innerHTML = "";
     if (!dataObj || Object.keys(dataObj).length === 0) {
         reportContainer.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
-
     const keys = Object.keys(dataObj);
     let idx = 1;
     for (const playerKey of keys) {
@@ -290,7 +296,6 @@ async function renderReports(dataObj) {
     }
 }
 
-// ---------- Members rendering with numbering ----------
 function createMemberCard(username, data, index = null) {
     const divCard = document.createElement("div");
     divCard.className = "member-card";
@@ -309,13 +314,11 @@ function createMemberCard(username, data, index = null) {
         </div>
     `;
 
-    // click to open modal
     divCard.style.cursor = "pointer";
     divCard.addEventListener("click", (e) => {
         openMemberModal(username, data);
     });
 
-    // copy on name
     const nameEl = divCard.querySelector(".mname");
     if (nameEl) {
         nameEl.title = "Click để copy tên/ID";
@@ -347,7 +350,7 @@ async function renderMembers(dataObj) {
     }
 }
 
-// ---------- Member modal & game fetching (same as earlier) ----------
+// ---------- Member modal & game fetching (unchanged) ----------
 function extractPlaceIdFromKey(key) {
     if (!key) return null;
     const m = key.match(/\((\d+)\)\s*$/);
@@ -440,7 +443,6 @@ memberModalClose2.addEventListener("click", closeMemberModal);
 memberModal.querySelector(".member-modal-overlay").addEventListener("click", closeMemberModal);
 
 // ---------- Load / delete ----------
-
 async function loadReports() {
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
@@ -448,7 +450,6 @@ async function loadReports() {
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedReports = json || {};
-        // apply search if any
         const q = (searchReportsInput.value || "").trim();
         const filtered = await filterReportsObject(cachedReports, q);
         await renderReports(filtered);
@@ -480,8 +481,9 @@ async function loadMembers() {
         const json = await res.json();
         cachedMembers = json || {};
         const q = (searchMembersInput.value || "").trim();
-        const filterVal = (filterGamesInput.value || "").trim();
-        const filtered = filterMembersObject(cachedMembers, q, filterVal === "" ? null : filterVal);
+        const minVal = (filterGamesMinInput.value || "").trim();
+        const maxVal = (filterGamesMaxInput.value || "").trim();
+        const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
         await renderMembers(filtered);
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
     } catch (err) {
@@ -552,8 +554,9 @@ async function autoLoadMembers(interval = 12000) {
                 cachedMembers = json || {};
                 if (pageMembers.classList.contains("active")) {
                     const q = (searchMembersInput.value || "").trim();
-                    const filterVal = (filterGamesInput.value || "").trim();
-                    const filtered = filterMembersObject(cachedMembers, q, filterVal === "" ? null : filterVal);
+                    const minVal = (filterGamesMinInput.value || "").trim();
+                    const maxVal = (filterGamesMaxInput.value || "").trim();
+                    const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
                     await renderMembers(filtered);
                 }
             }
@@ -600,8 +603,9 @@ const onSearchReports = debounce(async () => {
 
 const onSearchMembers = debounce(async () => {
     const q = (searchMembersInput.value || "").trim();
-    const filterVal = (filterGamesInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, filterVal === "" ? null : filterVal);
+    const minVal = (filterGamesMinInput.value || "").trim();
+    const maxVal = (filterGamesMaxInput.value || "").trim();
+    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
     await renderMembers(filtered);
     membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 }, 300);
@@ -612,13 +616,15 @@ searchMembersInput.addEventListener("input", onSearchMembers);
 // filter apply/clear
 applyFilterBtn.addEventListener("click", async () => {
     const q = (searchMembersInput.value || "").trim();
-    const filterVal = (filterGamesInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, filterVal === "" ? null : filterVal);
+    const minVal = (filterGamesMinInput.value || "").trim();
+    const maxVal = (filterGamesMaxInput.value || "").trim();
+    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
     await renderMembers(filtered);
     membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 });
 clearFilterBtn.addEventListener("click", async () => {
-    filterGamesInput.value = "";
+    filterGamesMinInput.value = "";
+    filterGamesMaxInput.value = "";
     searchMembersInput.value = "";
     await loadMembers();
 });
