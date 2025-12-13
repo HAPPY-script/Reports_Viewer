@@ -1,11 +1,12 @@
-// script.js - upgraded for Reports + Members + counts + transitions
+// script.js (updated) - includes Member detail modal (game list)
 
+// CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
 const API_URL_REPORTS = API_BASE_REPORTS + ".json";
-
 const API_BASE_MEMBER = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/Member";
 const API_URL_MEMBER = API_BASE_MEMBER + ".json";
 
+// DOM refs
 const reportContainer = document.getElementById("report-container");
 const memberContainer = document.getElementById("member-container");
 const popup = document.getElementById("confirm-popup");
@@ -17,6 +18,16 @@ const btnReports = document.getElementById("btn-reports");
 const btnMembers = document.getElementById("btn-members");
 const pageReports = document.getElementById("page-reports");
 const pageMembers = document.getElementById("page-members");
+
+// Member modal elements
+const memberModal = document.getElementById("member-modal");
+const memberModalClose = document.getElementById("member-modal-close");
+const memberModalClose2 = document.getElementById("member-modal-close-2");
+const memberAvatarEl = document.getElementById("member-avatar");
+const memberUsernameEl = document.getElementById("member-username");
+const memberUseridEl = document.getElementById("member-userid");
+const memberGamecountEl = document.getElementById("member-gamecount");
+const gameListEl = document.getElementById("game-list");
 
 let selectedPlayer = null;
 let cachedReports = null;
@@ -74,8 +85,6 @@ function updateTabCounts(reportsCount, membersCount) {
     btnReports.textContent = reportsCount && reportsCount > 0 ? `Reports (${reportsCount})` : "Reports";
     btnMembers.textContent = membersCount && membersCount > 0 ? `Members (${membersCount})` : "Members";
 }
-
-// switch view with CSS classes
 function showPage(page) {
     if (page === "reports") {
         btnReports.classList.add("active");
@@ -90,7 +99,7 @@ function showPage(page) {
     }
 }
 
-// ---------- Render Reports ----------
+// ---------- Reports (unchanged) ----------
 function createReportCard(playerKey, report, avatarUrl, userId) {
     const card = document.createElement("div");
     card.className = "card";
@@ -110,10 +119,8 @@ function createReportCard(playerKey, report, avatarUrl, userId) {
         <div class="timestamp">⏱ ${tsText}</div>
     `;
 
-    // click to confirm delete
     card.addEventListener("click", () => showConfirm(playerKey));
 
-    // copy name
     const nameEl = card.querySelector(".name");
     if (nameEl) {
         nameEl.style.cursor = "pointer";
@@ -123,7 +130,6 @@ function createReportCard(playerKey, report, avatarUrl, userId) {
             navigator.clipboard.writeText(playerKey).then(()=>alert(`Đã copy tên: ${playerKey}`)).catch(()=>alert("Copy thất bại"));
         });
     }
-    // copy id
     const idEl = card.querySelector(".userid");
     if (idEl && userId) {
         idEl.style.cursor = "pointer";
@@ -144,7 +150,6 @@ async function renderReports(data) {
     }
 
     const keys = Object.keys(data);
-    // iterate in insertion order
     for (const playerKey of keys) {
         const report = data[playerKey];
         let userId = (report && report.userId) ? report.userId : null;
@@ -161,7 +166,6 @@ async function renderReports(data) {
     }
 }
 
-// ---------- Load Reports ----------
 async function loadReports() {
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
@@ -175,8 +179,6 @@ async function loadReports() {
         console.error(err);
     }
 }
-
-// ---------- Delete report ----------
 async function deleteReport(playerName) {
     const deleteURL = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     try {
@@ -190,25 +192,118 @@ async function deleteReport(playerName) {
     }
 }
 
-// ---------- Popup ----------
-function showConfirm(playerName) {
-    selectedPlayer = playerName;
-    popup.classList.add("show");
-}
-function hideConfirm() {
-    selectedPlayer = null;
-    popup.classList.remove("show");
-}
-confirmYes.addEventListener("click", () => {
-    if (selectedPlayer) {
-        deleteReport(selectedPlayer);
-        hideConfirm();
-    }
-});
+// popup
+function showConfirm(playerName) { selectedPlayer = playerName; popup.classList.add("show"); }
+function hideConfirm() { selectedPlayer = null; popup.classList.remove("show"); }
+confirmYes.addEventListener("click", () => { if (selectedPlayer) { deleteReport(selectedPlayer); hideConfirm(); }});
 confirmNo.addEventListener("click", hideConfirm);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideConfirm(); });
 
-// ---------- Members rendering ----------
+// ---------- Members + modal ----------
+
+// Helper: try extract numeric placeId from SAFE_GAME_KEY, e.g. "Game Name (123456789)"
+function extractPlaceIdFromKey(key) {
+    if (!key) return null;
+    const m = key.match(/\((\d+)\)\s*$/);
+    if (m) return m[1];
+    // fallback: find any 6+ digit group
+    const mm = key.match(/(\d{5,})/);
+    return mm ? mm[1] : null;
+}
+
+// Fetch game icon by placeId (Roblox thumbnails services)
+// returns imageUrl or null
+async function fetchGameIcon(placeId) {
+    if (!placeId) return null;
+    try {
+        const url = `https://thumbnails.roblox.com/v1/games/icons?placeIds=${placeId}&size=128x128&format=Png`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const j = await res.json();
+        if (j && j.data && j.data.length > 0 && j.data[0].imageUrl) return j.data[0].imageUrl;
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Build a game item DOM node
+function makeGameItem(gameName, placeId, iconUrl) {
+    const item = document.createElement("div");
+    item.className = "game-item";
+    const thumb = document.createElement("img");
+    thumb.className = "game-thumb";
+    thumb.src = iconUrl || "https://www.roblox.com/asset-thumbnail/image?assetId=0&width=128&height=128&format=png"; // fallback blank
+    thumb.alt = gameName || "Game";
+
+    const info = document.createElement("div");
+    info.className = "game-info";
+    const nameEl = document.createElement("div");
+    nameEl.className = "game-name";
+    nameEl.textContent = gameName || "Unknown Game";
+    const idEl = document.createElement("div");
+    idEl.className = "game-id";
+    idEl.textContent = placeId ? `PlaceId: ${placeId}` : "PlaceId: —";
+
+    info.appendChild(nameEl);
+    info.appendChild(idEl);
+    item.appendChild(thumb);
+    item.appendChild(info);
+    return item;
+}
+
+// Open modal for member and fetch game icons
+async function openMemberModal(username, memberData) {
+    memberModal.classList.add("show");
+    memberModal.setAttribute("aria-hidden", "false");
+
+    // set header info
+    memberUsernameEl.textContent = username;
+    const uid = memberData && memberData.ID ? memberData.ID : null;
+    memberUseridEl.textContent = uid ? `ID: ${uid}` : "ID: —";
+    const gamesObj = memberData && memberData.Games ? memberData.Games : {};
+    const gameKeys = Object.keys(gamesObj || {});
+    memberGamecountEl.textContent = `Games: ${gameKeys.length}`;
+
+    // avatar
+    if (uid) {
+        const avatarUrl = await fetchAvatarImageUrl(uid, "150x150").catch(()=>null);
+        memberAvatarEl.src = avatarUrl || `https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png`;
+    } else {
+        memberAvatarEl.src = `https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png`;
+    }
+
+    // clear list and show loading placeholder
+    gameListEl.innerHTML = `<div class="loading">Đang tải danh sách game...</div>`;
+
+    if (gameKeys.length === 0) {
+        gameListEl.innerHTML = `<div class="loading">Không có game nào.</div>`;
+        return;
+    }
+
+    // prepare promises to fetch icons in parallel
+    const promises = gameKeys.map(async (gkey) => {
+        // try to extract placeId
+        const placeId = extractPlaceIdFromKey(gkey);
+        // For display name: if key contains " (id)" at end, remove that
+        let displayName = gkey.replace(/\s*\(\d+\)\s*$/, "").trim();
+        if (!displayName) displayName = gkey;
+        const icon = placeId ? await fetchGameIcon(placeId) : null;
+        return { key: gkey, name: displayName, placeId, icon };
+    });
+
+    // Wait all
+    const results = await Promise.all(promises);
+
+    // Fill UI
+    gameListEl.innerHTML = "";
+    results.forEach(r => {
+        const item = makeGameItem(r.name, r.placeId, r.icon);
+        gameListEl.appendChild(item);
+    });
+}
+
+// Hook member card click to open modal
 function createMemberCard(username, data) {
     const div = document.createElement("div");
     div.className = "member-card";
@@ -227,13 +322,23 @@ function createMemberCard(username, data) {
         </div>
     `;
 
-    // allow copy username/id
-    div.querySelector(".mname").style.cursor = "pointer";
-    div.querySelector(".mname").title = "Click để copy tên/ID";
-    div.querySelector(".mname").addEventListener("click", () => {
-        const toCopy = userId ? `${username} (${userId})` : username;
-        navigator.clipboard.writeText(toCopy).then(()=>alert(`Đã copy: ${toCopy}`)).catch(()=>alert("Copy thất bại"));
+    // click opens modal with details
+    div.style.cursor = "pointer";
+    div.addEventListener("click", (e) => {
+        openMemberModal(username, data);
     });
+
+    // copy on name click
+    const nameEl = div.querySelector(".mname");
+    if (nameEl) {
+        nameEl.title = "Click để copy tên/ID";
+        nameEl.style.cursor = "pointer";
+        nameEl.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const toCopy = userId ? `${username} (${userId})` : username;
+            navigator.clipboard.writeText(toCopy).then(()=>alert(`Đã copy: ${toCopy}`)).catch(()=>alert("Copy thất bại"));
+        });
+    }
 
     return div;
 }
@@ -245,7 +350,6 @@ async function renderMembers(data) {
         return;
     }
     const keys = Object.keys(data);
-    // show each member
     for (const username of keys) {
         const info = data[username];
         const card = createMemberCard(username, info);
@@ -253,7 +357,6 @@ async function renderMembers(data) {
     }
 }
 
-// ---------- Load Members ----------
 async function loadMembers() {
     memberContainer.innerHTML = "<div class='loading'>Đang tải danh sách thành viên...</div>";
     try {
@@ -268,7 +371,17 @@ async function loadMembers() {
     }
 }
 
-// ---------- Counts & auto-polling ----------
+// modal close handlers
+function closeMemberModal() {
+    memberModal.classList.remove("show");
+    memberModal.setAttribute("aria-hidden", "true");
+    gameListEl.innerHTML = ""; // clear
+}
+memberModalClose.addEventListener("click", closeMemberModal);
+memberModalClose2.addEventListener("click", closeMemberModal);
+memberModal.querySelector(".member-modal-overlay").addEventListener("click", closeMemberModal);
+
+// ---------- Counts & auto-polling (unchanged) ----------
 async function getReportsCount() {
     try {
         const res = await fetch(API_URL_REPORTS);
@@ -291,8 +404,6 @@ async function quickRefreshCounts() {
     const [rCount, mCount] = await Promise.all([getReportsCount(), getMembersCount()]);
     updateTabCounts(rCount, mCount);
 }
-
-// periodical auto-check (only checks counts quickly to update badges)
 let countsIntervalHandle = null;
 function startCountsPolling(interval = 7000) {
     quickRefreshCounts();
@@ -300,17 +411,15 @@ function startCountsPolling(interval = 7000) {
     countsIntervalHandle = setInterval(quickRefreshCounts, interval);
 }
 
-// ---------- auto load full reports if changes (like before) ----------
+// auto-load reports & members (unchanged)
 let reportsPollTimeout = null;
 async function autoLoadReports(interval = 5000) {
     try {
         const res = await fetch(API_URL_REPORTS);
         if (res.ok) {
             const json = await res.json();
-            // if changed, re-render and update cached
             if (JSON.stringify(json) !== JSON.stringify(cachedReports)) {
                 cachedReports = json;
-                // if user currently sees reports page -> render
                 if (pageReports.classList.contains("active")) await renderReports(json);
             }
         }
@@ -320,8 +429,6 @@ async function autoLoadReports(interval = 5000) {
         reportsPollTimeout = setTimeout(() => autoLoadReports(interval), interval);
     }
 }
-
-// ---------- auto load members less frequently ----------
 let membersPollTimeout = null;
 async function autoLoadMembers(interval = 12000) {
     try {
@@ -349,29 +456,21 @@ reloadBtn.addEventListener("click", async () => {
     }
     await quickRefreshCounts();
 });
-
-// Tab buttons
 btnReports.addEventListener("click", async () => {
     showPage("reports");
-    // ensure reports loaded
     if (!cachedReports) await loadReports();
 });
 btnMembers.addEventListener("click", async () => {
     showPage("members");
-    // ensure members loaded
     if (!cachedMembers) await loadMembers();
 });
 
-// initial actions
+// initial
 (async function init() {
-    // initial counts & load reports page by default
     startCountsPolling(7000);
     await quickRefreshCounts();
-
-    // load reports content and start autos
     await loadReports();
     autoLoadReports(5000);
     autoLoadMembers(12000);
-    // also auto refresh counts
     startCountsPolling(7000);
 })();
