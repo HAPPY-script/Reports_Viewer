@@ -1,4 +1,4 @@
-// script.js (update: min/max games range filter)
+// script.js (updated: respond/delete behavior, waiting-state handling, auto-delete 72h)
 
 // CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
@@ -28,7 +28,12 @@ const clearFilterBtn = document.getElementById("clear-filter");
 const reportsCountEl = document.getElementById("reports-count");
 const membersCountEl = document.getElementById("members-count");
 
-// Member modal elements
+// Reply modal elements
+const replyModal = document.getElementById("reply-modal");
+const replyText = document.getElementById("reply-text");
+const replySend = document.getElementById("reply-send");
+const replyCancel = document.getElementById("reply-cancel");
+
 const memberModal = document.getElementById("member-modal");
 const memberModalClose = document.getElementById("member-modal-close");
 const memberModalClose2 = document.getElementById("member-modal-close-2");
@@ -41,7 +46,11 @@ const gameListEl = document.getElementById("game-list");
 let selectedPlayer = null;
 let cachedReports = null;
 let cachedMembers = null;
+let pendingConfirmAction = null; // "delete-as-respond" etc
 const avatarPromiseCache = {};
+const DEFAULT_DELETE_RESPONSE = "The admin has reviewed your comment but has not responded.";
+
+const HOURS72_MS = 72 * 3600 * 1000;
 
 // ---------- utilities ----------
 function escapeHtml(unsafe) {
@@ -118,12 +127,9 @@ function showPage(page) {
 }
 
 // ---------- Filtering/Search logic ----------
-
 function isNumericString(s) {
     return /^\d+$/.test(String(s).trim());
 }
-
-// Filter reports object by query string (username, userId, message)
 async function filterReportsObject(obj, query) {
     if (!query || !obj) return obj;
     const q = query.trim().toLowerCase();
@@ -147,73 +153,6 @@ async function filterReportsObject(obj, query) {
     return out;
 }
 
-/*
-  Filter members object by:
-    - query (username, userId, game name, placeId)
-    - minGames, maxGames (both strings/input). Behavior:
-      empty min -> -Infinity, empty max -> +Infinity
-      non-numeric inputs are ignored (treated as empty)
-      if min > max -> swap
-*/
-function filterMembersObject(obj, query, minGames, maxGames) {
-    if (!obj) return obj;
-    const q = (query || "").trim().toLowerCase();
-    const numericQuery = isNumericString(q) ? q : null;
-
-    // parse min/max
-    let min = Number.NEGATIVE_INFINITY;
-    let max = Number.POSITIVE_INFINITY;
-    if (minGames !== null && minGames !== undefined && String(minGames).trim() !== "") {
-        const v = parseInt(String(minGames).trim(), 10);
-        if (!Number.isNaN(v)) min = v;
-    }
-    if (maxGames !== null && maxGames !== undefined && String(maxGames).trim() !== "") {
-        const v = parseInt(String(maxGames).trim(), 10);
-        if (!Number.isNaN(v)) max = v;
-    }
-    // swap if user accidentally provided min>max
-    if (min > max) {
-        const t = min; min = max; max = t;
-    }
-
-    const out = {};
-    for (const username of Object.keys(obj)) {
-        const data = obj[username] || {};
-        const uid = data.ID ? String(data.ID) : "";
-        const gamesObj = data.Games || {};
-        const gameKeys = Object.keys(gamesObj);
-        const count = gameKeys.length;
-
-        // check games count in range
-        if (count < min || count > max) continue;
-
-        // if no query -> include
-        if (!q) {
-            out[username] = data;
-            continue;
-        }
-
-        // match username or uid
-        if (username.toLowerCase().includes(q) || uid.includes(q)) {
-            out[username] = data;
-            continue;
-        }
-
-        // match inside game keys (game name or id)
-        let matched = false;
-        for (const gk of gameKeys) {
-            const gkl = gk.toLowerCase();
-            if (gkl.includes(q)) { matched = true; break; }
-            if (numericQuery) {
-                const digits = gk.match(/(\d{4,})/g);
-                if (digits && digits.join(" ").includes(numericQuery)) { matched = true; break; }
-            }
-        }
-        if (matched) out[username] = data;
-    }
-    return out;
-}
-
 // ---------- Rendering with numbering ----------
 function makeNumberedRow(number, innerCard) {
     const wrapper = document.createElement("div");
@@ -226,7 +165,7 @@ function makeNumberedRow(number, innerCard) {
     return wrapper;
 }
 
-// Create report/member cards (same as before)...
+// Create report card with actions (respond / delete)
 function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
@@ -234,9 +173,14 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
     const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
 
+    // determine responded state
+    const responded = !!(report && (report.responded || report.response));
+    const responseText = (report && report.response) ? escapeHtml(report.response) : "";
+
+    // main html
     card.innerHTML = `
         <div class="top-section">
-            <img class="avatar" src="${avatarUrl}" alt="avatar" onerror="this.onerror=null;this.src='https://www.roblox.com/headshot-thumbnail/image?userId=1&width=150&height=150&format=Png'">
+            <img class="avatar" src="${avatarUrl}" alt="avatar">
             <div class="info">
                 <div class="name">👤 ${escapeHtml(playerKey)}</div>
                 <div class="userid">ID: ${userId || "Không tìm thấy"}</div>
@@ -246,8 +190,62 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         <div class="timestamp">⏱ ${tsText}</div>
     `;
 
-    card.addEventListener("click", () => showConfirm(playerKey));
+    // admin response area if any
+    if (responded && responseText) {
+        const respDiv = document.createElement("div");
+        respDiv.className = "admin-response";
+        respDiv.innerHTML = `<strong>Admin:</strong> ${responseText}`;
+        card.appendChild(respDiv);
+    }
 
+    // waiting meta for responded without deletion
+    if (responded) {
+        const meta = document.createElement("div");
+        meta.className = "waiting-meta";
+        // compute expire info (if respondedAt exists)
+        let expireInfo = "";
+        const respondedAt = report.respondedAt || report.respondedAtMillis || report.respondedAt_ms || report.respondedTimestamp || null;
+        if (respondedAt) {
+            const remainMs = (Number(respondedAt) + HOURS72_MS) - Date.now();
+            if (remainMs > 0) {
+                const hours = Math.floor(remainMs / (3600*1000));
+                const mins = Math.floor((remainMs % (3600*1000))/(60*1000));
+                expireInfo = ` • expires in ${hours}h${mins}m`;
+            } else {
+                expireInfo = ` • expires soon`;
+            }
+        }
+        meta.textContent = "Waiting for user to delete report" + (expireInfo ? expireInfo : " (auto remove after 72h)");
+        card.appendChild(meta);
+        card.classList.add("waiting");
+    }
+
+    // actions row
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    // Respond button
+    const btnRespond = document.createElement("button");
+    btnRespond.className = "btn-respond";
+    btnRespond.textContent = "Respond";
+    // Delete button
+    const btnDelete = document.createElement("button");
+    btnDelete.className = "btn-delete";
+    btnDelete.textContent = "Delete";
+
+    // Disable actions for already-responded (spec: cannot delete; but respond could be disabled)
+    if (responded) {
+        btnDelete.classList.add("btn-disabled");
+        btnDelete.disabled = true;
+        btnRespond.classList.add("btn-disabled");
+        btnRespond.disabled = true;
+    }
+
+    actions.appendChild(btnRespond);
+    actions.appendChild(btnDelete);
+    card.appendChild(actions);
+
+    // event handlers
+    // copy name/id
     const nameEl = card.querySelector(".name");
     if (nameEl) {
         nameEl.style.cursor = "pointer";
@@ -267,19 +265,52 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         });
     }
 
+    // Respond opens modal
+    btnRespond.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openReplyModal(playerKey, report);
+    });
+
+    // Delete -> per spec: do NOT actually remove; instead respond with default phrase
+    btnDelete.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // ask confirm
+        selectedPlayer = playerKey;
+        pendingConfirmAction = "delete-as-respond";
+        document.getElementById("confirm-title").textContent = "This will send a default admin reply. Continue?";
+        popup.classList.add("show");
+    });
+
     if (index !== null) return makeNumberedRow(index, card);
     return card;
 }
 
+// render: place unresponded first, responded last (and dim)
 async function renderReports(dataObj) {
     reportContainer.innerHTML = "";
     if (!dataObj || Object.keys(dataObj).length === 0) {
         reportContainer.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
-    const keys = Object.keys(dataObj);
+
+    // auto-clean responded older than 72h
+    // but do it asynchronously and don't block rendering
+    cleanupOldResponded(dataObj).catch(err=>console.warn("cleanup error", err));
+
+    // build two lists
+    const unrespKeys = [];
+    const respKeys = [];
+    for (const key of Object.keys(dataObj)) {
+        const r = dataObj[key] || {};
+        const responded = !!(r.responded || r.response);
+        if (responded) respKeys.push(key); else unrespKeys.push(key);
+    }
+
+    // order: unresponded first (keep alphabetical or timestamp?), then responded
+    const allKeys = unrespKeys.concat(respKeys);
+
     let idx = 1;
-    for (const playerKey of keys) {
+    for (const playerKey of allKeys) {
         const report = dataObj[playerKey];
         let userId = (report && report.userId) ? report.userId : null;
         if (!userId) userId = await getUserIdFromUsername(playerKey);
@@ -296,6 +327,7 @@ async function renderReports(dataObj) {
     }
 }
 
+// ---------- Member card (unchanged) ----------
 function createMemberCard(username, data, index = null) {
     const divCard = document.createElement("div");
     divCard.className = "member-card";
@@ -442,7 +474,7 @@ memberModalClose.addEventListener("click", closeMemberModal);
 memberModalClose2.addEventListener("click", closeMemberModal);
 memberModal.querySelector(".member-modal-overlay").addEventListener("click", closeMemberModal);
 
-// ---------- Load / delete ----------
+// ---------- Load / delete / respond ----------
 async function loadReports() {
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
@@ -459,20 +491,75 @@ async function loadReports() {
         console.error(err);
     }
 }
-async function deleteReport(playerName) {
-    const deleteURL = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
+
+// Mark a report as responded with given responseText (PATCH)
+async function respondToReport(playerName, responseText) {
+    const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
+    const payload = {
+        responded: true,
+        response: responseText,
+        respondedAt: Date.now()
+    };
     try {
-        const res = await fetch(deleteURL, { method: "DELETE" });
-        if (!res.ok) throw new Error("delete failed");
+        const res = await fetch(url, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error("respond failed");
+        // refresh local view quickly
         await quickRefreshCounts();
         await loadReports();
+        return true;
     } catch (err) {
-        alert("Không thể xóa report!");
-        console.error(err);
+        console.error("respondToReport error", err);
+        alert("Không thể gửi phản hồi. Xem console.");
+        return false;
     }
 }
 
-// ---------- Members load with search/filter ----------
+// Remove a report completely (DELETE) — used only by auto-cleanup when expired, or optionally if user removed.
+async function removeReportCompletely(playerName) {
+    const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
+    try {
+        const res = await fetch(url, { method: "DELETE" });
+        if (!res.ok) throw new Error("delete failed");
+        await quickRefreshCounts();
+        await loadReports();
+        return true;
+    } catch (err) {
+        console.error("removeReportCompletely error", err);
+        return false;
+    }
+}
+
+// cleanup responded older than 72h
+async function cleanupOldResponded(reportsObj) {
+    if (!reportsObj) return;
+    const keys = Object.keys(reportsObj);
+    const now = Date.now();
+    for (const key of keys) {
+        const r = reportsObj[key];
+        if (!r) continue;
+        const responded = !!(r.responded || r.response);
+        if (!responded) continue;
+        const respondedAt = Number(r.respondedAt || r.respondedAtMillis || r.respondedTimestamp || r.responded_ts || r.timestamp || 0);
+        // if respondedAt not set, try fallback to timestamp
+        const base = respondedAt || (r.timestamp ? Number(r.timestamp) : 0);
+        if (!base) continue; // cannot decide
+        if (now - base >= HOURS72_MS) {
+            // auto delete
+            try {
+                await removeReportCompletely(key);
+                console.log("Auto-removed expired responded report:", key);
+            } catch (e) {
+                console.warn("Auto remove failed for", key, e);
+            }
+        }
+    }
+}
+
+// ---------- Members load with search/filter (unchanged) ----------
 async function loadMembers() {
     memberContainer.innerHTML = "<div class='loading'>Đang tải danh sách thành viên...</div>";
     try {
@@ -492,7 +579,7 @@ async function loadMembers() {
     }
 }
 
-// ---------- counts & polling ----------
+// ---------- counts & polling (unchanged) ----------
 async function getReportsCount() {
     try {
         const res = await fetch(API_URL_REPORTS);
@@ -522,7 +609,6 @@ function startCountsPolling(interval = 7000) {
     countsIntervalHandle = setInterval(quickRefreshCounts, interval);
 }
 
-// auto-update small
 let reportsPollTimeout = null;
 async function autoLoadReports(interval = 5000) {
     try {
@@ -569,11 +655,48 @@ async function autoLoadMembers(interval = 12000) {
 }
 
 // ---------- popup ----------
-function showConfirm(playerName) { selectedPlayer = playerName; popup.classList.add("show"); }
-function hideConfirm() { selectedPlayer = null; popup.classList.remove("show"); }
-confirmYes.addEventListener("click", () => { if (selectedPlayer) { deleteReport(selectedPlayer); hideConfirm(); }});
+// reuse existing confirm popup for "Delete will send default response"
+function showConfirm(playerName, action) { selectedPlayer = playerName; pendingConfirmAction = action || "delete-as-respond"; popup.classList.add("show"); }
+function hideConfirm() { selectedPlayer = null; pendingConfirmAction = null; popup.classList.remove("show"); }
+confirmYes.addEventListener("click", async () => {
+    popup.classList.remove("show");
+    if (!selectedPlayer) return;
+    if (pendingConfirmAction === "delete-as-respond") {
+        // send default response as admin (do not delete)
+        await respondToReport(selectedPlayer, DEFAULT_DELETE_RESPONSE);
+        alert("Default reply sent.");
+    }
+    selectedPlayer = null;
+    pendingConfirmAction = null;
+});
 confirmNo.addEventListener("click", hideConfirm);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideConfirm(); });
+
+// ---------- Reply modal ----------
+function openReplyModal(playerName, report) {
+    selectedPlayer = playerName;
+    replyText.value = "";
+    replyModal.classList.add("show");
+}
+function closeReplyModal() {
+    replyModal.classList.remove("show");
+    replyText.value = "";
+    selectedPlayer = null;
+}
+replyCancel.addEventListener("click", closeReplyModal);
+replyModal.addEventListener("click", (ev) => {
+    if (ev.target === replyModal) closeReplyModal();
+});
+replySend.addEventListener("click", async () => {
+    const text = (replyText.value || "").trim();
+    if (!text) { alert("Please enter a response."); return; }
+    if (!selectedPlayer) { alert("No player selected."); closeReplyModal(); return; }
+    const ok = await respondToReport(selectedPlayer, text);
+    if (ok) {
+        alert("Response sent.");
+        closeReplyModal();
+    }
+});
 
 // ---------- Event wiring & search handlers ----------
 reloadBtn.addEventListener("click", async () => {
@@ -593,7 +716,6 @@ btnMembers.addEventListener("click", async () => {
     if (!cachedMembers) await loadMembers();
 });
 
-// search handlers (debounced)
 const onSearchReports = debounce(async () => {
     const q = (searchReportsInput.value || "").trim();
     const filtered = await filterReportsObject(cachedReports || {}, q);
