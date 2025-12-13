@@ -1,5 +1,3 @@
-// script.js (updated: respond/delete behavior, waiting-state handling, auto-delete 72h)
-
 // CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
 const API_URL_REPORTS = API_BASE_REPORTS + ".json";
@@ -664,7 +662,6 @@ confirmYes.addEventListener("click", async () => {
     if (pendingConfirmAction === "delete-as-respond") {
         // send default response as admin (do not delete)
         await respondToReport(selectedPlayer, DEFAULT_DELETE_RESPONSE);
-        alert("Default reply sent.");
     }
     selectedPlayer = null;
     pendingConfirmAction = null;
@@ -693,7 +690,6 @@ replySend.addEventListener("click", async () => {
     if (!selectedPlayer) { alert("No player selected."); closeReplyModal(); return; }
     const ok = await respondToReport(selectedPlayer, text);
     if (ok) {
-        alert("Response sent.");
         closeReplyModal();
     }
 });
