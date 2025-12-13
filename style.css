@@ -349,3 +349,72 @@ body {
   .member-avatar { width:56px; height:56px; }
   .game-thumb { width:52px; height:52px; }
 }
+
+/* Controls (search/filter) */
+.page-controls {
+    display:flex;
+    gap:10px;
+    align-items:center;
+    margin-bottom:12px;
+    justify-content:flex-start;
+    flex-wrap:wrap;
+}
+.search-input, .filter-input {
+    padding:8px 12px;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,0.06);
+    background:#101016;
+    color:white;
+    outline:none;
+    min-width:260px;
+}
+.filter-input { max-width:140px; }
+.small-btn {
+    padding:8px 10px;
+    border-radius:8px;
+    background:#3a3aff;
+    color:white;
+    border:none;
+    cursor:pointer;
+    font-weight:600;
+}
+.small-btn.alt {
+    background:transparent; border:1px solid rgba(255,255,255,0.08); color:white;
+}
+
+/* small muted label next to controls */
+.small-muted { color: rgba(220,220,255,0.55); font-size:13px; margin-left:8px; }
+
+/* numbered row wrapper */
+.card-row {
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+    margin-bottom: 12px;
+}
+/* left line-number */
+.line-number {
+    min-width:36px;
+    height:36px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:rgba(255,255,255,0.88);
+    background: linear-gradient(180deg,#1b1b24,#0e0e13);
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.04);
+    font-weight:700;
+    opacity:0.95;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 -6px 16px rgba(255,255,255,0.02);
+}
+
+/* ensure member-card and report .card shrink into right column */
+.card-row > .card, .card-row > .member-card {
+    flex:1 1 auto;
+}
+
+/* responsive: collapse number for small screens */
+@media (max-width:520px) {
+    .line-number { display:none; }
+    .search-input { min-width: 140px; }
+}
