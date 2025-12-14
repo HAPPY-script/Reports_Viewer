@@ -540,3 +540,36 @@ body {
     box-shadow: 0 0 14px rgba(209, 76, 255, 0.9),
                 0 0 28px rgba(209, 76, 255, 0.45);
 }
+
+/* Dim styles for responded reports */
+.card.responded-reply {
+    /* subtle green tint + slight desaturate */
+    background: linear-gradient(180deg, rgba(10,30,10,0.35), rgba(15,15,20,0.5));
+    border-color: rgba(40,160,80,0.12);
+    filter: saturate(0.85) brightness(0.94);
+    box-shadow: 0 6px 20px rgba(20,80,30,0.06);
+}
+.card.responded-reply .admin-response {
+    border-left: 3px solid rgba(80,205,120,0.25);
+    padding-left: 8px;
+    margin-top:8px;
+}
+
+.card.responded-delete {
+    /* subtle red tint */
+    background: linear-gradient(180deg, rgba(50,10,10,0.32), rgba(15,12,15,0.5));
+    border-color: rgba(255,80,80,0.12);
+    filter: saturate(0.8) brightness(0.92);
+    box-shadow: 0 6px 20px rgba(120,20,20,0.06);
+}
+.card.responded-delete .admin-response {
+    border-left: 3px solid rgba(255,100,100,0.28);
+    padding-left: 8px;
+    margin-top:8px;
+}
+
+/* optional: slightly dim the action buttons when responded */
+.card.responded-reply .card-actions,
+.card.responded-delete .card-actions {
+    opacity: 0.85;
+}
