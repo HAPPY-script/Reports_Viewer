@@ -916,23 +916,45 @@ async function filterAndRenderReports(q) {
     reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
 }
 
-// Wire filter buttons (container must exist in DOM)
-if (reportsFilterEl) {
+// Robust binding for reports filter UI
+let reportsFilterBound = false;
+
+function bindReportsFilter() {
+    if (reportsFilterBound) return;
+    // try re-query (in case script ran before HTML)
+    const el = reportsFilterEl || document.getElementById("reports-filter");
+    if (!el) return; // still not present -> give up for now (DOMContentLoaded will retry)
+
+    reportsFilterEl = el;
+
     reportsFilterEl.addEventListener("click", (ev) => {
-        const btn = ev.target && ev.target.closest && ev.target.closest(".filter-btn");
+        // find closest .filter-btn (supports clicks on inner text)
+        const target = ev.target;
+        const btn = (typeof target.closest === "function") ? target.closest(".filter-btn") : (target.classList && target.classList.contains("filter-btn") ? target : null);
         if (!btn) return;
         const f = btn.getAttribute("data-filter");
         if (!f) return;
+
         currentReportFilter = f;
-        // update active class visually
+
+        // update active class for buttons
         const allBtns = reportsFilterEl.querySelectorAll(".filter-btn");
-        allBtns.forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        // apply current search text + filter
+        allBtns.forEach(b => b.classList.toggle("active", b === btn));
+
+        // apply filter using current search text
         const q = (searchReportsInput.value || "").trim();
         filterAndRenderReports(q);
     });
+
+    reportsFilterBound = true;
 }
+
+// ensure binding when DOM ready and also attempt immediately
+document.addEventListener("DOMContentLoaded", () => {
+    bindReportsFilter();
+});
+// attempt immediate bind (in case script is loaded at end of body)
+bindReportsFilter();
 
 searchMembersInput.addEventListener("input", onSearchMembers);
 
