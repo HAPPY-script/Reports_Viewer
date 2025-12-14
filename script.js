@@ -32,6 +32,7 @@ const replyText = document.getElementById("reply-text");
 const replySend = document.getElementById("reply-send");
 const replyCancel = document.getElementById("reply-cancel");
 
+// Member modal elements
 const memberModal = document.getElementById("member-modal");
 const memberModalClose = document.getElementById("member-modal-close");
 const memberModalClose2 = document.getElementById("member-modal-close-2");
@@ -41,8 +42,8 @@ const memberUseridEl = document.getElementById("member-userid");
 const memberGamecountEl = document.getElementById("member-gamecount");
 const gameListEl = document.getElementById("game-list");
 
-// Report filter UI element (HTML bạn đã chèn)
-const reportsFilterEl = document.getElementById("reports-filter");
+// Report filter UI element (can be bound later)
+let reportsFilterEl = document.getElementById("reports-filter");
 let currentReportFilter = "all"; // possible values: "all","unresolved","resolved","deleted","responded"
 
 let selectedPlayer = null;
@@ -109,27 +110,26 @@ function debounce(fn, wait = 300) {
 
 // ---------- UI helpers ----------
 function updateTabCounts(reportsCount, membersCount) {
-    btnReports.textContent = reportsCount && reportsCount > 0 ? `Reports (${reportsCount})` : "Reports";
-    btnMembers.textContent = membersCount && membersCount > 0 ? `Members (${membersCount})` : "Members";
-    reportsCountEl.textContent = reportsCount ? `${reportsCount} result(s)` : "";
-    membersCountEl.textContent = membersCount ? `${membersCount} member(s)` : "";
+    if (btnReports) btnReports.textContent = reportsCount && reportsCount > 0 ? `Reports (${reportsCount})` : "Reports";
+    if (btnMembers) btnMembers.textContent = membersCount && membersCount > 0 ? `Members (${membersCount})` : "Members";
+    if (reportsCountEl) reportsCountEl.textContent = reportsCount ? `${reportsCount} result(s)` : "";
+    if (membersCountEl) membersCountEl.textContent = membersCount ? `${membersCount} member(s)` : "";
 }
 function showPage(page) {
     if (page === "reports") {
-        btnReports.classList.add("active");
-        btnMembers.classList.remove("active");
-        pageReports.classList.add("active");
-        pageMembers.classList.remove("active");
+        btnReports && btnReports.classList.add("active");
+        btnMembers && btnMembers.classList.remove("active");
+        pageReports && pageReports.classList.add("active");
+        pageMembers && pageMembers.classList.remove("active");
     } else {
-        btnMembers.classList.add("active");
-        btnReports.classList.remove("active");
-        pageMembers.classList.add("active");
-        pageReports.classList.remove("active");
+        btnMembers && btnMembers.classList.add("active");
+        btnReports && btnReports.classList.remove("active");
+        pageMembers && pageMembers.classList.add("active");
+        pageReports && pageReports.classList.remove("active");
     }
 }
 
 // ---------- Filtering/Search logic ----------
-
 function isNumericString(s) {
     return /^\d+$/.test(String(s).trim());
 }
@@ -141,11 +141,10 @@ function isNumericString(s) {
   - statusFilter: "all" | "unresolved" | "resolved" | "deleted" | "responded"
 */
 async function filterReportsObject(obj, query, statusFilter = "all") {
-    if (!obj) return obj;
+    if (!obj) return {};
 
     const sf = (statusFilter || "all").toString().toLowerCase();
 
-    // helper: check whether a report matches the chosen status filter
     function statusMatches(r) {
         const responded = !!(r && (r.responded || r.response));
         let responseType = null;
@@ -218,16 +217,11 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
     return out;
 }
 
-/*
-  filterMembersObject:
-    - accepts query; if query is "/<n>" -> returns only the member at index n (keys order)
-    - supports min/max games as before
-*/
+/* members filter unchanged (kept concise here) */
 function filterMembersObject(obj, query, minGames, maxGames) {
-    if (!obj) return obj;
+    if (!obj) return {};
     const rawQuery = (query || "").trim();
 
-    // check line-search first
     const lineMatch = rawQuery.match(/^\/\s*(\d+)\s*$/);
     if (lineMatch) {
         const n = parseInt(lineMatch[1], 10);
@@ -235,7 +229,7 @@ function filterMembersObject(obj, query, minGames, maxGames) {
         const allKeys = Object.keys(obj);
         if (n > allKeys.length) return {};
         const pickKey = allKeys[n - 1];
-        // still apply min/max filter if provided
+
         let min = Number.NEGATIVE_INFINITY;
         let max = Number.POSITIVE_INFINITY;
         if (minGames !== null && String(minGames).trim() !== "") {
@@ -251,13 +245,12 @@ function filterMembersObject(obj, query, minGames, maxGames) {
         const data = obj[pickKey];
         const gamesObj = data && data.Games ? data.Games : {};
         const count = Object.keys(gamesObj).length;
-        if (count < min || count > max) return {}; // out of range
+        if (count < min || count > max) return {};
         const o = {};
         o[pickKey] = data;
         return o;
     }
 
-    // not a line-search: old behaviour (with min/max parsing)
     const q = rawQuery.toLowerCase();
     const numericQuery = /^\d+$/.test(q) ? q : null;
 
@@ -311,7 +304,7 @@ function filterMembersObject(obj, query, minGames, maxGames) {
     return out;
 }
 
-// ---------- Rendering with numbering ----------
+// ---------- Rendering ----------
 function makeNumberedRow(number, innerCard) {
     const wrapper = document.createElement("div");
     wrapper.className = "card-row";
@@ -323,7 +316,6 @@ function makeNumberedRow(number, innerCard) {
     return wrapper;
 }
 
-// Create report card with actions (respond / delete)
 function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
@@ -331,9 +323,7 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
     const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
 
-    // determine responded state
     const responded = !!(report && (report.responded || report.response));
-    // determine responseType: prefer explicit field, fallback to comparing response text with DEFAULT_DELETE_RESPONSE
     let responseType = null;
     if (report && report.responseType) responseType = String(report.responseType);
     else if (report && report.response && report.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
@@ -341,7 +331,6 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
 
     const responseText = (report && report.response) ? escapeHtml(report.response) : "";
 
-    // main html
     card.innerHTML = `
         <div class="top-section">
             <img class="avatar" src="${avatarUrl}" alt="avatar">
@@ -354,16 +343,11 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         <div class="timestamp">⏱ ${tsText}</div>
     `;
 
-    // apply dim class depending on responseType
     if (responded) {
-        if (responseType === "delete") {
-            card.classList.add("responded-delete");
-        } else {
-            card.classList.add("responded-reply");
-        }
+        if (responseType === "delete") card.classList.add("responded-delete");
+        else card.classList.add("responded-reply");
     }
 
-    // admin response area if any
     if (responded && responseText) {
         const respDiv = document.createElement("div");
         respDiv.className = "admin-response";
@@ -371,11 +355,9 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         card.appendChild(respDiv);
     }
 
-    // waiting meta for responded without deletion
     if (responded) {
         const meta = document.createElement("div");
         meta.className = "waiting-meta";
-        // compute expire info (if respondedAt exists)
         let expireInfo = "";
         const respondedAt = report.respondedAt || report.respondedAtMillis || report.respondedAt_ms || report.respondedTimestamp || report.responded_ts || report.timestamp || null;
         if (respondedAt) {
@@ -394,19 +376,15 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         card.classList.add("waiting");
     }
 
-    // actions row
     const actions = document.createElement("div");
     actions.className = "card-actions";
-    // Respond button
     const btnRespond = document.createElement("button");
     btnRespond.className = "btn-respond";
     btnRespond.textContent = "Respond";
-    // Delete button
     const btnDelete = document.createElement("button");
     btnDelete.className = "btn-delete";
     btnDelete.textContent = "Delete";
 
-    // Disable actions for already-responded (spec: cannot delete; but respond could be disabled)
     if (responded) {
         btnDelete.classList.add("btn-disabled");
         btnDelete.disabled = true;
@@ -418,8 +396,7 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     actions.appendChild(btnDelete);
     card.appendChild(actions);
 
-    // event handlers
-    // copy name/id
+    // copy name/id handlers
     const nameEl = card.querySelector(".name");
     if (nameEl) {
         nameEl.style.cursor = "pointer";
@@ -439,40 +416,34 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         });
     }
 
-    // Respond opens modal
     btnRespond.addEventListener("click", (e) => {
         e.stopPropagation();
         openReplyModal(playerKey, report);
     });
 
-    // Delete -> per spec: do NOT actually remove; instead respond with default phrase
     btnDelete.addEventListener("click", (e) => {
         e.stopPropagation();
-        // ask confirm
         selectedPlayer = playerKey;
         pendingConfirmAction = "delete-as-respond";
-        // set title element if exists
         const titleEl = document.getElementById("confirm-title");
         if (titleEl) titleEl.textContent = "This will send a default admin reply. Continue?";
-        popup.classList.add("show");
+        popup && popup.classList.add("show");
     });
 
     if (index !== null) return makeNumberedRow(index, card);
     return card;
 }
 
-// render: place unresponded first, responded last (and dim)
 async function renderReports(dataObj) {
+    if (!reportContainer) return;
     reportContainer.innerHTML = "";
     if (!dataObj || Object.keys(dataObj).length === 0) {
         reportContainer.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
 
-    // auto-clean responded older than 72h (async)
     cleanupOldResponded(dataObj).catch(err=>console.warn("cleanup error", err));
 
-    // build two lists
     const unrespKeys = [];
     const respKeys = [];
     for (const key of Object.keys(dataObj)) {
@@ -501,7 +472,7 @@ async function renderReports(dataObj) {
     }
 }
 
-// ---------- Member card (unchanged) ----------
+// Member card functions kept the same (unchanged)
 function createMemberCard(username, data, index = null) {
     const divCard = document.createElement("div");
     divCard.className = "member-card";
@@ -541,6 +512,7 @@ function createMemberCard(username, data, index = null) {
 }
 
 async function renderMembers(dataObj) {
+    if (!memberContainer) return;
     memberContainer.innerHTML = "";
     if (!dataObj || Object.keys(dataObj).length === 0) {
         memberContainer.innerHTML = "<div class='loading'>Chưa có thành viên nào.</div>";
@@ -577,32 +549,9 @@ async function fetchGameIcon(placeId) {
         return null;
     }
 }
-function makeGameItem(gameName, placeId, iconUrl) {
-    const item = document.createElement("div");
-    item.className = "game-item";
-    const thumb = document.createElement("img");
-    thumb.className = "game-thumb";
-    thumb.src = iconUrl || "https://www.roblox.com/asset-thumbnail/image?assetId=0&width=128&height=128&format=png";
-    thumb.alt = gameName || "Game";
-
-    const info = document.createElement("div");
-    info.className = "game-info";
-    const nameEl = document.createElement("div");
-    nameEl.className = "game-name";
-    nameEl.textContent = gameName || "Unknown Game";
-    const idEl = document.createElement("div");
-    idEl.className = "game-id";
-    idEl.textContent = placeId ? `PlaceId: ${placeId}` : "PlaceId: —";
-
-    info.appendChild(nameEl);
-    info.appendChild(idEl);
-    item.appendChild(thumb);
-    item.appendChild(info);
-    return item;
-}
 async function openMemberModal(username, memberData) {
-    memberModal.classList.add("show");
-    memberModal.setAttribute("aria-hidden", "false");
+    memberModal && memberModal.classList.add("show");
+    memberModal && memberModal.setAttribute("aria-hidden", "false");
 
     memberUsernameEl.textContent = username;
     const uid = memberData && memberData.ID ? memberData.ID : null;
@@ -640,24 +589,51 @@ async function openMemberModal(username, memberData) {
     });
 }
 function closeMemberModal() {
-    memberModal.classList.remove("show");
-    memberModal.setAttribute("aria-hidden", "true");
+    memberModal && memberModal.classList.remove("show");
+    memberModal && memberModal.setAttribute("aria-hidden", "true");
     gameListEl.innerHTML = "";
 }
-memberModalClose.addEventListener("click", closeMemberModal);
-memberModalClose2.addEventListener("click", closeMemberModal);
-memberModal.querySelector(".member-modal-overlay").addEventListener("click", closeMemberModal);
+memberModalClose && memberModalClose.addEventListener("click", closeMemberModal);
+memberModalClose2 && memberModalClose2.addEventListener("click", closeMemberModal);
+const overlayEl = memberModal && memberModal.querySelector && memberModal.querySelector(".member-modal-overlay");
+overlayEl && overlayEl.addEventListener("click", closeMemberModal);
+
+function makeGameItem(gameName, placeId, iconUrl) {
+    const item = document.createElement("div");
+    item.className = "game-item";
+    const thumb = document.createElement("img");
+    thumb.className = "game-thumb";
+    thumb.src = iconUrl || "https://www.roblox.com/asset-thumbnail/image?assetId=0&width=128&height=128&format=png";
+    thumb.alt = gameName || "Game";
+
+    const info = document.createElement("div");
+    info.className = "game-info";
+    const nameEl = document.createElement("div");
+    nameEl.className = "game-name";
+    nameEl.textContent = gameName || "Unknown Game";
+    const idEl = document.createElement("div");
+    idEl.className = "game-id";
+    idEl.textContent = placeId ? `PlaceId: ${placeId}` : "PlaceId: —";
+
+    info.appendChild(nameEl);
+    info.appendChild(idEl);
+    item.appendChild(thumb);
+    item.appendChild(info);
+    return item;
+}
 
 // ---------- Load / delete / respond ----------
-
 async function loadReports() {
+    if (!reportContainer) return;
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
         const res = await fetch(API_URL_REPORTS);
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedReports = json || {};
-        const q = (searchReportsInput.value || "").trim();
+        // ensure filter UI is bound
+        bindReportsFilter();
+        const q = (searchReportsInput && searchReportsInput.value || "").trim();
         const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
         await renderReports(filtered);
         updateTabCounts(Object.keys(cachedReports).length, cachedMembers ? Object.keys(cachedMembers).length : 0);
@@ -667,8 +643,6 @@ async function loadReports() {
     }
 }
 
-// Mark a report as responded with given responseText (PATCH)
-// new: accepts optional responseType ('reply' or 'delete') and stores it in DB
 async function respondToReport(playerName, responseText, responseType = "reply") {
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     const payload = {
@@ -684,7 +658,6 @@ async function respondToReport(playerName, responseText, responseType = "reply")
             body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error("respond failed");
-        // refresh local view quickly
         await quickRefreshCounts();
         await loadReports();
         return true;
@@ -695,7 +668,6 @@ async function respondToReport(playerName, responseText, responseType = "reply")
     }
 }
 
-// Remove a report completely (DELETE) — used only by auto-cleanup when expired, or optionally if user removed.
 async function removeReportCompletely(playerName) {
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     try {
@@ -721,11 +693,9 @@ async function cleanupOldResponded(reportsObj) {
         const responded = !!(r.responded || r.response);
         if (!responded) continue;
         const respondedAt = Number(r.respondedAt || r.respondedAtMillis || r.respondedTimestamp || r.responded_ts || r.timestamp || 0);
-        // if respondedAt not set, try fallback to timestamp
         const base = respondedAt || (r.timestamp ? Number(r.timestamp) : 0);
-        if (!base) continue; // cannot decide
+        if (!base) continue;
         if (now - base >= HOURS72_MS) {
-            // auto delete
             try {
                 await removeReportCompletely(key);
                 console.log("Auto-removed expired responded report:", key);
@@ -736,17 +706,18 @@ async function cleanupOldResponded(reportsObj) {
     }
 }
 
-// ---------- Members load with search/filter (unchanged) ----------
+// ---------- Members load ----------
 async function loadMembers() {
+    if (!memberContainer) return;
     memberContainer.innerHTML = "<div class='loading'>Đang tải danh sách thành viên...</div>";
     try {
         const res = await fetch(API_URL_MEMBER);
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedMembers = json || {};
-        const q = (searchMembersInput.value || "").trim();
-        const minVal = (filterGamesMinInput.value || "").trim();
-        const maxVal = (filterGamesMaxInput.value || "").trim();
+        const q = (searchMembersInput && searchMembersInput.value || "").trim();
+        const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+        const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
         const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
         await renderMembers(filtered);
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
@@ -756,7 +727,7 @@ async function loadMembers() {
     }
 }
 
-// ---------- counts & polling (unchanged) ----------
+// ---------- counts & polling ----------
 async function getReportsCount() {
     try {
         const res = await fetch(API_URL_REPORTS);
@@ -794,8 +765,8 @@ async function autoLoadReports(interval = 5000) {
             const json = await res.json();
             if (JSON.stringify(json || {}) !== JSON.stringify(cachedReports || {})) {
                 cachedReports = json || {};
-                if (pageReports.classList.contains("active")) {
-                    const q = (searchReportsInput.value || "").trim();
+                if (pageReports && pageReports.classList.contains("active")) {
+                    const q = (searchReportsInput && searchReportsInput.value || "").trim();
                     const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
                     await renderReports(filtered);
                 }
@@ -815,10 +786,10 @@ async function autoLoadMembers(interval = 12000) {
             const json = await res.json();
             if (JSON.stringify(json || {}) !== JSON.stringify(cachedMembers || {})) {
                 cachedMembers = json || {};
-                if (pageMembers.classList.contains("active")) {
-                    const q = (searchMembersInput.value || "").trim();
-                    const minVal = (filterGamesMinInput.value || "").trim();
-                    const maxVal = (filterGamesMaxInput.value || "").trim();
+                if (pageMembers && pageMembers.classList.contains("active")) {
+                    const q = (searchMembersInput && searchMembersInput.value || "").trim();
+                    const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+                    const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
                     const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
                     await renderMembers(filtered);
                 }
@@ -832,145 +803,138 @@ async function autoLoadMembers(interval = 12000) {
 }
 
 // ---------- popup ----------
-// reuse existing confirm popup for "Delete will send default response"
-function showConfirm(playerName, action) { selectedPlayer = playerName; pendingConfirmAction = action || "delete-as-respond"; popup.classList.add("show"); }
-function hideConfirm() { selectedPlayer = null; pendingConfirmAction = null; popup.classList.remove("show"); }
-confirmYes.addEventListener("click", async () => {
-    popup.classList.remove("show");
+function showConfirm(playerName, action) { selectedPlayer = playerName; pendingConfirmAction = action || "delete-as-respond"; popup && popup.classList.add("show"); }
+function hideConfirm() { selectedPlayer = null; pendingConfirmAction = null; popup && popup.classList.remove("show"); }
+confirmYes && confirmYes.addEventListener("click", async () => {
+    popup && popup.classList.remove("show");
     if (!selectedPlayer) return;
     if (pendingConfirmAction === "delete-as-respond") {
-        // send default response as admin (do not delete), mark as type 'delete'
         await respondToReport(selectedPlayer, DEFAULT_DELETE_RESPONSE, "delete");
     }
     selectedPlayer = null;
     pendingConfirmAction = null;
 });
-confirmNo.addEventListener("click", hideConfirm);
+confirmNo && confirmNo.addEventListener("click", hideConfirm);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideConfirm(); });
 
 // ---------- Reply modal ----------
 function openReplyModal(playerName, report) {
     selectedPlayer = playerName;
-    replyText.value = "";
-    replyModal.classList.add("show");
+    if (replyText) replyText.value = "";
+    replyModal && replyModal.classList.add("show");
 }
 function closeReplyModal() {
-    replyModal.classList.remove("show");
-    replyText.value = "";
+    replyModal && replyModal.classList.remove("show");
+    if (replyText) replyText.value = "";
     selectedPlayer = null;
 }
-replyCancel.addEventListener("click", closeReplyModal);
-replyModal.addEventListener("click", (ev) => {
+replyCancel && replyCancel.addEventListener("click", closeReplyModal);
+replyModal && replyModal.addEventListener("click", (ev) => {
     if (ev.target === replyModal) closeReplyModal();
 });
-replySend.addEventListener("click", async () => {
-    const text = (replyText.value || "").trim();
+replySend && replySend.addEventListener("click", async () => {
+    const text = (replyText && replyText.value || "").trim();
     if (!text) { alert("Please enter a response."); return; }
     if (!selectedPlayer) { alert("No player selected."); closeReplyModal(); return; }
     const ok = await respondToReport(selectedPlayer, text, "reply");
-    if (ok) {
-        closeReplyModal();
-    }
+    if (ok) closeReplyModal();
 });
 
 // ---------- Event wiring & search handlers ----------
-reloadBtn.addEventListener("click", async () => {
-    if (pageReports.classList.contains("active")) {
-        await loadReports();
-    } else {
-        await loadMembers();
-    }
+reloadBtn && reloadBtn.addEventListener("click", async () => {
+    if (pageReports && pageReports.classList.contains("active")) await loadReports();
+    else await loadMembers();
     await quickRefreshCounts();
 });
-btnReports.addEventListener("click", async () => {
+btnReports && btnReports.addEventListener("click", async () => {
     showPage("reports");
     if (!cachedReports) await loadReports();
 });
-btnMembers.addEventListener("click", async () => {
+btnMembers && btnMembers.addEventListener("click", async () => {
     showPage("members");
     if (!cachedMembers) await loadMembers();
 });
 
 const onSearchReports = debounce(async () => {
-    const q = (searchReportsInput.value || "").trim();
+    const q = (searchReportsInput && searchReportsInput.value || "").trim();
     const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
     await renderReports(filtered);
-    reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
+    if (reportsCountEl) reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
 }, 300);
 
 const onSearchMembers = debounce(async () => {
-    const q = (searchMembersInput.value || "").trim();
-    const minVal = (filterGamesMinInput.value || "").trim();
-    const maxVal = (filterGamesMaxInput.value || "").trim();
+    const q = (searchMembersInput && searchMembersInput.value || "").trim();
+    const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+    const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
     const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
     await renderMembers(filtered);
-    membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
+    if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 }, 300);
 
-searchReportsInput.addEventListener("input", onSearchReports);
+searchReportsInput && searchReportsInput.addEventListener("input", onSearchReports);
+searchMembersInput && searchMembersInput.addEventListener("input", onSearchMembers);
 
 // Helper: apply search + currentReportFilter and render
 async function filterAndRenderReports(q) {
     const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
     await renderReports(filtered);
-    reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
+    if (reportsCountEl) reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
 }
 
-// Robust binding for reports filter UI
+// ---------- Reports filter binding (robust) ----------
 let reportsFilterBound = false;
 
 function bindReportsFilter() {
     if (reportsFilterBound) return;
-    // try re-query (in case script ran before HTML)
     const el = reportsFilterEl || document.getElementById("reports-filter");
-    if (!el) return; // still not present -> give up for now (DOMContentLoaded will retry)
-
+    if (!el) return;
     reportsFilterEl = el;
 
     reportsFilterEl.addEventListener("click", (ev) => {
-        // find closest .filter-btn (supports clicks on inner text)
         const target = ev.target;
-        const btn = (typeof target.closest === "function") ? target.closest(".filter-btn") : (target.classList && target.classList.contains("filter-btn") ? target : null);
+        const btn = (target && typeof target.closest === "function") ? target.closest(".filter-btn") : null;
         if (!btn) return;
         const f = btn.getAttribute("data-filter");
         if (!f) return;
 
         currentReportFilter = f;
 
-        // update active class for buttons
+        // update active class
         const allBtns = reportsFilterEl.querySelectorAll(".filter-btn");
         allBtns.forEach(b => b.classList.toggle("active", b === btn));
 
-        // apply filter using current search text
-        const q = (searchReportsInput.value || "").trim();
+        // re-render using current search
+        const q = (searchReportsInput && searchReportsInput.value || "").trim();
         filterAndRenderReports(q);
     });
+
+    // if initial active class set in HTML, sync currentReportFilter with it
+    const initialActive = reportsFilterEl.querySelector(".filter-btn.active");
+    if (initialActive) {
+        const init = initialActive.getAttribute("data-filter");
+        if (init) currentReportFilter = init;
+    }
 
     reportsFilterBound = true;
 }
 
-// ensure binding when DOM ready and also attempt immediately
-document.addEventListener("DOMContentLoaded", () => {
-    bindReportsFilter();
-});
-// attempt immediate bind (in case script is loaded at end of body)
+// try immediate bind and also bind on DOMContentLoaded
 bindReportsFilter();
+document.addEventListener("DOMContentLoaded", bindReportsFilter);
 
-searchMembersInput.addEventListener("input", onSearchMembers);
-
-// filter apply/clear
-applyFilterBtn.addEventListener("click", async () => {
-    const q = (searchMembersInput.value || "").trim();
-    const minVal = (filterGamesMinInput.value || "").trim();
-    const maxVal = (filterGamesMaxInput.value || "").trim();
+// filter apply/clear for members
+applyFilterBtn && applyFilterBtn.addEventListener("click", async () => {
+    const q = (searchMembersInput && searchMembersInput.value || "").trim();
+    const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+    const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
     const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
     await renderMembers(filtered);
-    membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
+    if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 });
-clearFilterBtn.addEventListener("click", async () => {
-    filterGamesMinInput.value = "";
-    filterGamesMaxInput.value = "";
-    searchMembersInput.value = "";
+clearFilterBtn && clearFilterBtn.addEventListener("click", async () => {
+    if (filterGamesMinInput) filterGamesMinInput.value = "";
+    if (filterGamesMaxInput) filterGamesMaxInput.value = "";
+    if (searchMembersInput) searchMembersInput.value = "";
     await loadMembers();
 });
 
@@ -985,33 +949,24 @@ clearFilterBtn.addEventListener("click", async () => {
 
 // ===== Scroll To Top Button =====
 const scrollBtn = document.getElementById("scrollTopBtn");
+if (scrollBtn) {
+    window.addEventListener("scroll", () => {
+        const y = window.scrollY || document.documentElement.scrollTop;
+        if (y > 120) scrollBtn.classList.add("show");
+        else scrollBtn.classList.remove("show");
+    });
 
-// show button when scroll beyond threshold
-window.addEventListener("scroll", () => {
-    const y = window.scrollY || document.documentElement.scrollTop;
-    if (y > 120) {
-        scrollBtn.classList.add("show");
-    } else {
-        scrollBtn.classList.remove("show");
-    }
-});
-
-// scroll faster when further down
-scrollBtn.addEventListener("click", () => {
-    let start = window.scrollY || document.documentElement.scrollTop;
-    if (start <= 0) return;
-
-    // speed based on distance
-    let duration = Math.min(800, Math.max(250, start / 2));
-
-    const startTime = performance.now();
-
-    function scrollStep(now) {
-        const progress = Math.min((now - startTime) / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-        window.scrollTo(0, start * (1 - ease));
-        if (progress < 1) requestAnimationFrame(scrollStep);
-    }
-
-    requestAnimationFrame(scrollStep);
-});
+    scrollBtn.addEventListener("click", () => {
+        let start = window.scrollY || document.documentElement.scrollTop;
+        if (start <= 0) return;
+        let duration = Math.min(800, Math.max(250, start / 2));
+        const startTime = performance.now();
+        function scrollStep(now) {
+            const progress = Math.min((now - startTime) / duration, 1);
+            const ease = 1 - Math.pow(1 - progress, 3);
+            window.scrollTo(0, start * (1 - ease));
+            if (progress < 1) requestAnimationFrame(scrollStep);
+        }
+        requestAnimationFrame(scrollStep);
+    });
+}
