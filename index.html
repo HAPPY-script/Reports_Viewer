@@ -36,6 +36,14 @@
         <section id="page-reports" class="page active">
             <div class="page-controls">
                 <input id="search-reports" class="search-input" placeholder="Tìm theo username, userId, hoặc nội dung report..." />
+                <!-- Reports filter (All / Unresolved / Resolved / Deleted / Responded) -->
+                <div id="reports-filter" class="reports-filter">
+                  <button class="filter-btn active" data-filter="all">ALL</button>
+                  <button class="filter-btn" data-filter="unresolved">Chưa giải quyết</button>
+                  <button class="filter-btn" data-filter="resolved">Đã giải quyết</button>
+                  <button class="filter-btn" data-filter="deleted">Đã delete</button>
+                  <button class="filter-btn" data-filter="responded">Đã respond</button>
+                </div>
                 <div id="reports-count" class="small-muted"></div>
             </div>
             <div id="report-container" class="container">
