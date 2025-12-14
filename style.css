@@ -504,3 +504,39 @@ body {
 
 /* make number column spacing not break when waiting */
 .line-number { min-width:36px; }
+
+.scroll-top-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d14cff, #8a3aff);
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    box-shadow: 0 8px 30px rgba(180, 80, 255, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(20px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    z-index: 999;
+}
+
+.scroll-top-btn.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.scroll-top-btn:hover {
+    box-shadow: 0 0 14px rgba(209, 76, 255, 0.9),
+                0 0 28px rgba(209, 76, 255, 0.45);
+}
