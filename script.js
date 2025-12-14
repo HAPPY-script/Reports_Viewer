@@ -41,6 +41,10 @@ const memberUseridEl = document.getElementById("member-userid");
 const memberGamecountEl = document.getElementById("member-gamecount");
 const gameListEl = document.getElementById("game-list");
 
+// Report filter UI element (HTML bạn đã chèn)
+const reportsFilterEl = document.getElementById("reports-filter");
+let currentReportFilter = "all"; // possible values: "all","unresolved","resolved","deleted","responded"
+
 let selectedPlayer = null;
 let cachedReports = null;
 let cachedMembers = null;
@@ -131,21 +135,50 @@ function isNumericString(s) {
 }
 
 /*
-  filterReportsObject:
-    - if query is like "/<n>" -> return the single report at line n (based on ordering: unresponded first then responded)
-    - otherwise behave as before (search username, message, userId)
-*/
-async function filterReportsObject(obj, query) {
-    if (!obj) return obj;
-    if (!query || String(query).trim() === "") return obj;
+  filterReportsObject(obj, query, statusFilter)
 
-    const raw = String(query).trim();
-    // line-search pattern: "/10" optionally spaces
+  - query: supports "/<n>" (line search).
+  - statusFilter: "all" | "unresolved" | "resolved" | "deleted" | "responded"
+*/
+async function filterReportsObject(obj, query, statusFilter = "all") {
+    if (!obj) return obj;
+
+    const sf = (statusFilter || "all").toString().toLowerCase();
+
+    // helper: check whether a report matches the chosen status filter
+    function statusMatches(r) {
+        const responded = !!(r && (r.responded || r.response));
+        let responseType = null;
+        if (r && r.responseType) responseType = String(r.responseType);
+        else if (r && r.response && r.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
+        else if (responded) responseType = "reply";
+
+        if (sf === "all") return true;
+        if (sf === "unresolved") return !responded;
+        if (sf === "resolved") return responded;
+        if (sf === "deleted") return responseType === "delete";
+        if (sf === "responded") return responseType === "reply";
+        return true;
+    }
+
+    const raw = (query || "").toString().trim();
+
+    // If no query (empty) -> return all reports that match status
+    if (!raw) {
+        const out = {};
+        for (const k of Object.keys(obj)) {
+            const r = obj[k] || {};
+            if (statusMatches(r)) out[k] = r;
+        }
+        return out;
+    }
+
+    // line-search "/<n>" -> apply status filter then pick nth in ordered list
     const lineMatch = raw.match(/^\/\s*(\d+)\s*$/);
     if (lineMatch) {
         const n = parseInt(lineMatch[1], 10);
-        if (!Number.isFinite(n) || n <= 0) return {}; // nothing
-        // compute ordered keys (same logic as renderReports)
+        if (!Number.isFinite(n) || n <= 0) return {};
+        // build ordered keys: unresponded first then responded
         const unrespKeys = [];
         const respKeys = [];
         for (const key of Object.keys(obj)) {
@@ -154,21 +187,22 @@ async function filterReportsObject(obj, query) {
             if (responded) respKeys.push(key); else unrespKeys.push(key);
         }
         const allKeys = unrespKeys.concat(respKeys);
-        if (n > allKeys.length) return {};
-        const pick = allKeys[n - 1];
+        // apply status filter to ordering
+        const filteredKeys = allKeys.filter(k => statusMatches(obj[k] || {}));
+        if (n > filteredKeys.length) return {};
+        const pick = filteredKeys[n - 1];
         if (!pick) return {};
-        const out = {};
-        out[pick] = obj[pick];
-        return out;
+        return { [pick]: obj[pick] };
     }
 
-    // normal search
+    // normal search + status filter
     const q = raw.toLowerCase();
     const numeric = isNumericString(q) ? q : null;
-
     const out = {};
     for (const key of Object.keys(obj)) {
         const r = obj[key] || {};
+        if (!statusMatches(r)) continue;
+
         const msg = (r.message || "").toString().toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
@@ -624,7 +658,7 @@ async function loadReports() {
         const json = await res.json();
         cachedReports = json || {};
         const q = (searchReportsInput.value || "").trim();
-        const filtered = await filterReportsObject(cachedReports, q);
+        const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
         await renderReports(filtered);
         updateTabCounts(Object.keys(cachedReports).length, cachedMembers ? Object.keys(cachedMembers).length : 0);
     } catch (err) {
@@ -762,7 +796,7 @@ async function autoLoadReports(interval = 5000) {
                 cachedReports = json || {};
                 if (pageReports.classList.contains("active")) {
                     const q = (searchReportsInput.value || "").trim();
-                    const filtered = await filterReportsObject(cachedReports, q);
+                    const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
                     await renderReports(filtered);
                 }
             }
@@ -859,7 +893,7 @@ btnMembers.addEventListener("click", async () => {
 
 const onSearchReports = debounce(async () => {
     const q = (searchReportsInput.value || "").trim();
-    const filtered = await filterReportsObject(cachedReports || {}, q);
+    const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
     await renderReports(filtered);
     reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
 }, 300);
@@ -874,6 +908,32 @@ const onSearchMembers = debounce(async () => {
 }, 300);
 
 searchReportsInput.addEventListener("input", onSearchReports);
+
+// Helper: apply search + currentReportFilter and render
+async function filterAndRenderReports(q) {
+    const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
+    await renderReports(filtered);
+    reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
+}
+
+// Wire filter buttons (container must exist in DOM)
+if (reportsFilterEl) {
+    reportsFilterEl.addEventListener("click", (ev) => {
+        const btn = ev.target && ev.target.closest && ev.target.closest(".filter-btn");
+        if (!btn) return;
+        const f = btn.getAttribute("data-filter");
+        if (!f) return;
+        currentReportFilter = f;
+        // update active class visually
+        const allBtns = reportsFilterEl.querySelectorAll(".filter-btn");
+        allBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        // apply current search text + filter
+        const q = (searchReportsInput.value || "").trim();
+        filterAndRenderReports(q);
+    });
+}
+
 searchMembersInput.addEventListener("input", onSearchMembers);
 
 // filter apply/clear
