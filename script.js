@@ -125,12 +125,45 @@ function showPage(page) {
 }
 
 // ---------- Filtering/Search logic ----------
+
 function isNumericString(s) {
     return /^\d+$/.test(String(s).trim());
 }
+
+/*
+  filterReportsObject:
+    - if query is like "/<n>" -> return the single report at line n (based on ordering: unresponded first then responded)
+    - otherwise behave as before (search username, message, userId)
+*/
 async function filterReportsObject(obj, query) {
-    if (!query || !obj) return obj;
-    const q = query.trim().toLowerCase();
+    if (!obj) return obj;
+    if (!query || String(query).trim() === "") return obj;
+
+    const raw = String(query).trim();
+    // line-search pattern: "/10" optionally spaces
+    const lineMatch = raw.match(/^\/\s*(\d+)\s*$/);
+    if (lineMatch) {
+        const n = parseInt(lineMatch[1], 10);
+        if (!Number.isFinite(n) || n <= 0) return {}; // nothing
+        // compute ordered keys (same logic as renderReports)
+        const unrespKeys = [];
+        const respKeys = [];
+        for (const key of Object.keys(obj)) {
+            const r = obj[key] || {};
+            const responded = !!(r.responded || r.response);
+            if (responded) respKeys.push(key); else unrespKeys.push(key);
+        }
+        const allKeys = unrespKeys.concat(respKeys);
+        if (n > allKeys.length) return {};
+        const pick = allKeys[n - 1];
+        if (!pick) return {};
+        const out = {};
+        out[pick] = obj[pick];
+        return out;
+    }
+
+    // normal search
+    const q = raw.toLowerCase();
     const numeric = isNumericString(q) ? q : null;
 
     const out = {};
@@ -151,9 +184,47 @@ async function filterReportsObject(obj, query) {
     return out;
 }
 
+/*
+  filterMembersObject:
+    - accepts query; if query is "/<n>" -> returns only the member at index n (keys order)
+    - supports min/max games as before
+*/
 function filterMembersObject(obj, query, minGames, maxGames) {
     if (!obj) return obj;
-    const q = (query || "").trim().toLowerCase();
+    const rawQuery = (query || "").trim();
+
+    // check line-search first
+    const lineMatch = rawQuery.match(/^\/\s*(\d+)\s*$/);
+    if (lineMatch) {
+        const n = parseInt(lineMatch[1], 10);
+        if (!Number.isFinite(n) || n <= 0) return {};
+        const allKeys = Object.keys(obj);
+        if (n > allKeys.length) return {};
+        const pickKey = allKeys[n - 1];
+        // still apply min/max filter if provided
+        let min = Number.NEGATIVE_INFINITY;
+        let max = Number.POSITIVE_INFINITY;
+        if (minGames !== null && String(minGames).trim() !== "") {
+            const v = parseInt(String(minGames).trim(), 10);
+            if (!Number.isNaN(v)) min = v;
+        }
+        if (maxGames !== null && String(maxGames).trim() !== "") {
+            const v = parseInt(String(maxGames).trim(), 10);
+            if (!Number.isNaN(v)) max = v;
+        }
+        if (min > max) { const t = min; min = max; max = t; }
+
+        const data = obj[pickKey];
+        const gamesObj = data && data.Games ? data.Games : {};
+        const count = Object.keys(gamesObj).length;
+        if (count < min || count > max) return {}; // out of range
+        const o = {};
+        o[pickKey] = data;
+        return o;
+    }
+
+    // not a line-search: old behaviour (with min/max parsing)
+    const q = rawQuery.toLowerCase();
     const numericQuery = /^\d+$/.test(q) ? q : null;
 
     let min = Number.NEGATIVE_INFINITY;
@@ -228,6 +299,12 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
 
     // determine responded state
     const responded = !!(report && (report.responded || report.response));
+    // determine responseType: prefer explicit field, fallback to comparing response text with DEFAULT_DELETE_RESPONSE
+    let responseType = null;
+    if (report && report.responseType) responseType = String(report.responseType);
+    else if (report && report.response && report.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
+    else if (responded) responseType = "reply";
+
     const responseText = (report && report.response) ? escapeHtml(report.response) : "";
 
     // main html
@@ -243,6 +320,15 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         <div class="timestamp">⏱ ${tsText}</div>
     `;
 
+    // apply dim class depending on responseType
+    if (responded) {
+        if (responseType === "delete") {
+            card.classList.add("responded-delete");
+        } else {
+            card.classList.add("responded-reply");
+        }
+    }
+
     // admin response area if any
     if (responded && responseText) {
         const respDiv = document.createElement("div");
@@ -257,9 +343,10 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         meta.className = "waiting-meta";
         // compute expire info (if respondedAt exists)
         let expireInfo = "";
-        const respondedAt = report.respondedAt || report.respondedAtMillis || report.respondedAt_ms || report.respondedTimestamp || null;
+        const respondedAt = report.respondedAt || report.respondedAtMillis || report.respondedAt_ms || report.respondedTimestamp || report.responded_ts || report.timestamp || null;
         if (respondedAt) {
-            const remainMs = (Number(respondedAt) + HOURS72_MS) - Date.now();
+            const base = Number(respondedAt);
+            const remainMs = (base + HOURS72_MS) - Date.now();
             if (remainMs > 0) {
                 const hours = Math.floor(remainMs / (3600*1000));
                 const mins = Math.floor((remainMs % (3600*1000))/(60*1000));
@@ -330,7 +417,9 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
         // ask confirm
         selectedPlayer = playerKey;
         pendingConfirmAction = "delete-as-respond";
-        document.getElementById("confirm-title").textContent = "This will send a default admin reply. Continue?";
+        // set title element if exists
+        const titleEl = document.getElementById("confirm-title");
+        if (titleEl) titleEl.textContent = "This will send a default admin reply. Continue?";
         popup.classList.add("show");
     });
 
@@ -346,8 +435,7 @@ async function renderReports(dataObj) {
         return;
     }
 
-    // auto-clean responded older than 72h
-    // but do it asynchronously and don't block rendering
+    // auto-clean responded older than 72h (async)
     cleanupOldResponded(dataObj).catch(err=>console.warn("cleanup error", err));
 
     // build two lists
@@ -359,7 +447,6 @@ async function renderReports(dataObj) {
         if (responded) respKeys.push(key); else unrespKeys.push(key);
     }
 
-    // order: unresponded first (keep alphabetical or timestamp?), then responded
     const allKeys = unrespKeys.concat(respKeys);
 
     let idx = 1;
@@ -528,6 +615,7 @@ memberModalClose2.addEventListener("click", closeMemberModal);
 memberModal.querySelector(".member-modal-overlay").addEventListener("click", closeMemberModal);
 
 // ---------- Load / delete / respond ----------
+
 async function loadReports() {
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
@@ -546,12 +634,14 @@ async function loadReports() {
 }
 
 // Mark a report as responded with given responseText (PATCH)
-async function respondToReport(playerName, responseText) {
+// new: accepts optional responseType ('reply' or 'delete') and stores it in DB
+async function respondToReport(playerName, responseText, responseType = "reply") {
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     const payload = {
         responded: true,
         response: responseText,
-        respondedAt: Date.now()
+        respondedAt: Date.now(),
+        responseType: responseType
     };
     try {
         const res = await fetch(url, {
@@ -715,8 +805,8 @@ confirmYes.addEventListener("click", async () => {
     popup.classList.remove("show");
     if (!selectedPlayer) return;
     if (pendingConfirmAction === "delete-as-respond") {
-        // send default response as admin (do not delete)
-        await respondToReport(selectedPlayer, DEFAULT_DELETE_RESPONSE);
+        // send default response as admin (do not delete), mark as type 'delete'
+        await respondToReport(selectedPlayer, DEFAULT_DELETE_RESPONSE, "delete");
     }
     selectedPlayer = null;
     pendingConfirmAction = null;
@@ -743,7 +833,7 @@ replySend.addEventListener("click", async () => {
     const text = (replyText.value || "").trim();
     if (!text) { alert("Please enter a response."); return; }
     if (!selectedPlayer) { alert("No player selected."); closeReplyModal(); return; }
-    const ok = await respondToReport(selectedPlayer, text);
+    const ok = await respondToReport(selectedPlayer, text, "reply");
     if (ok) {
         closeReplyModal();
     }
@@ -814,7 +904,7 @@ clearFilterBtn.addEventListener("click", async () => {
 // ===== Scroll To Top Button =====
 const scrollBtn = document.getElementById("scrollTopBtn");
 
-// hiện nút khi cuộn qua header
+// show button when scroll beyond threshold
 window.addEventListener("scroll", () => {
     const y = window.scrollY || document.documentElement.scrollTop;
     if (y > 120) {
@@ -824,12 +914,12 @@ window.addEventListener("scroll", () => {
     }
 });
 
-// cuộn càng xa → càng nhanh
+// scroll faster when further down
 scrollBtn.addEventListener("click", () => {
     let start = window.scrollY || document.documentElement.scrollTop;
     if (start <= 0) return;
 
-    // tốc độ dựa theo khoảng cách
+    // speed based on distance
     let duration = Math.min(800, Math.max(250, start / 2));
 
     const startTime = performance.now();
