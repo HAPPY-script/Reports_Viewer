@@ -810,3 +810,36 @@ clearFilterBtn.addEventListener("click", async () => {
     autoLoadReports(5000);
     autoLoadMembers(12000);
 })();
+
+// ===== Scroll To Top Button =====
+const scrollBtn = document.getElementById("scrollTopBtn");
+
+// hiện nút khi cuộn qua header
+window.addEventListener("scroll", () => {
+    const y = window.scrollY || document.documentElement.scrollTop;
+    if (y > 120) {
+        scrollBtn.classList.add("show");
+    } else {
+        scrollBtn.classList.remove("show");
+    }
+});
+
+// cuộn càng xa → càng nhanh
+scrollBtn.addEventListener("click", () => {
+    let start = window.scrollY || document.documentElement.scrollTop;
+    if (start <= 0) return;
+
+    // tốc độ dựa theo khoảng cách
+    let duration = Math.min(800, Math.max(250, start / 2));
+
+    const startTime = performance.now();
+
+    function scrollStep(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+        window.scrollTo(0, start * (1 - ease));
+        if (progress < 1) requestAnimationFrame(scrollStep);
+    }
+
+    requestAnimationFrame(scrollStep);
+});
