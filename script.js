@@ -269,7 +269,7 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
         const r = obj[key] || {};
         if (!statusMatches(r)) continue;
 
-        const msg = (r.message || "").toString().toLowerCase();
+        const msg = decodeFirebaseMessage(r.message || "").toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
 
@@ -710,7 +710,7 @@ async function respondToReport(playerName, responseText, responseType = "reply")
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     const payload = {
         responded: true,
-        response: responseText,
+        response: encodeFirebaseMessage(responseText),
         respondedAt: Date.now(),
         responseType: responseType
     };
