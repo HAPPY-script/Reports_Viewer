@@ -1,70 +1,3 @@
-// ---------- Firebase escape/unescape (client) ----------
-const FIREBASE_ESCAPE_MAP = {
-    ".": "{DOT}",
-    "#": "{HASH}",
-    "$": "{DOLLAR}",
-    "[": "{LBRACKET}",
-    "]": "{RBRACKET}",
-    "/": "{SLASH}",
-    "\\": "{BACKSLASH}"
-};
-// reverse map for decoding
-const FIREBASE_UNESCAPE_MAP = {};
-for (const k in FIREBASE_ESCAPE_MAP) FIREBASE_UNESCAPE_MAP[FIREBASE_ESCAPE_MAP[k]] = k;
-
-/**
- * decodeFirebaseMessage(encoded)
- * - decodes {0xNN} hex-encoded control tokens to raw chars
- * - decodes {DOT},{HASH}... tokens back to original chars
- */
-function decodeFirebaseMessage(encoded) {
-    if (!encoded) return "";
-    let s = String(encoded);
-
-    // 1) decode hex tokens {0xNN} -> char
-    s = s.replace(/\{0x([0-9A-Fa-f]{2})\}/g, function(_, hex) {
-        const code = parseInt(hex, 16);
-        if (!Number.isNaN(code)) return String.fromCharCode(code);
-        return "";
-    });
-
-    // 2) decode known tokens like {DOT} -> '.'
-    // replace tokens by iterating reverse map; use split/join to avoid regex pitfalls
-    for (const token in FIREBASE_UNESCAPE_MAP) {
-        const ch = FIREBASE_UNESCAPE_MAP[token];
-        s = s.split(token).join(ch);
-    }
-
-    return s;
-}
-
-/**
- * encodeFirebaseMessage(raw)
- * - replaces forbidden firebase key characters with tokens
- * - encodes control chars (0x00-0x1F and 0x7F) as {0xNN}
- * Use this before sending admin responses to Firebase (PATCH/PUT).
- */
-function encodeFirebaseMessage(raw) {
-    if (raw === null || raw === undefined) return "";
-    let s = String(raw);
-
-    // 1) encode control chars -> {0xNN}
-    // cover ASCII control range 0x00-0x1F and 0x7F
-    s = s.replace(/[\x00-\x1F\x7F]/g, function(ch) {
-        const code = ch.charCodeAt(0);
-        return `{0x${code.toString(16).toUpperCase().padStart(2, "0")}}`;
-    });
-
-    // 2) replace firebase-forbidden characters with tokens
-    // do simple loop to avoid regex escaping issues
-    for (const ch in FIREBASE_ESCAPE_MAP) {
-        const token = FIREBASE_ESCAPE_MAP[ch];
-        s = s.split(ch).join(token);
-    }
-
-    return s;
-}
-
 // CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
 const API_URL_REPORTS = API_BASE_REPORTS + ".json";
@@ -269,7 +202,7 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
         const r = obj[key] || {};
         if (!statusMatches(r)) continue;
 
-        const msg = decodeFirebaseMessage(r.message || "").toLowerCase();
+        const msg = (r.message || "").toString().toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
 
@@ -387,12 +320,16 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
 
-    // decode then escape for safe HTML display
-    const rawMsg = (report && report.message) ? decodeFirebaseMessage(report.message) : "(Không có nội dung)";
-    const safeMessage = escapeHtml(rawMsg);
+    const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
+    const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
 
-    const rawResponse = (report && report.response) ? decodeFirebaseMessage(report.response) : "";
-    const responseText = escapeHtml(rawResponse);
+    const responded = !!(report && (report.responded || report.response));
+    let responseType = null;
+    if (report && report.responseType) responseType = String(report.responseType);
+    else if (report && report.response && report.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
+    else if (responded) responseType = "reply";
+
+    const responseText = (report && report.response) ? escapeHtml(report.response) : "";
 
     card.innerHTML = `
         <div class="top-section">
@@ -710,7 +647,7 @@ async function respondToReport(playerName, responseText, responseType = "reply")
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     const payload = {
         responded: true,
-        response: encodeFirebaseMessage(responseText),
+        response: responseText,
         respondedAt: Date.now(),
         responseType: responseType
     };
