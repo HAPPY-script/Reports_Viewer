@@ -99,6 +99,67 @@ async function fetchAvatarImageUrl(userId, size = "150x150") {
     return p;
 }
 
+// ---------- FIREBASE ESCAPE/UNESCAPE (CLIENT SIDE) ----------
+const FIREBASE_ESCAPE_MAP = {
+    ".": "{DOT}",
+    "#": "{HASH}",
+    "$": "{DOLLAR}",
+    "[": "{LBRACKET}",
+    "]": "{RBRACKET}",
+    "/": "{SLASH}",
+    "\\": "{BACKSLASH}"
+};
+const FIREBASE_UNESCAPE_MAP = {};
+for (const k in FIREBASE_ESCAPE_MAP) FIREBASE_UNESCAPE_MAP[FIREBASE_ESCAPE_MAP[k]] = k;
+
+/**
+ * decodeFirebaseMessage(encoded)
+ * - decode tokens {0xNN} to raw control char
+ * - decode tokens like {DOT} back to '.'
+ */
+function decodeFirebaseMessage(encoded) {
+    if (!encoded) return "";
+    let s = String(encoded);
+
+    // decode {0xNN} -> char
+    s = s.replace(/\{0x([0-9A-Fa-f]{2})\}/g, function (_, hex) {
+        const code = parseInt(hex, 16);
+        if (!Number.isNaN(code)) return String.fromCharCode(code);
+        return "";
+    });
+
+    // decode token map
+    for (const token in FIREBASE_UNESCAPE_MAP) {
+        const ch = FIREBASE_UNESCAPE_MAP[token];
+        s = s.split(token).join(ch);
+    }
+
+    return s;
+}
+
+/**
+ * encodeFirebaseMessage(raw)
+ * - encode control chars (0x00-0x1F and 0x7F) as {0xNN}
+ * - replace forbidden firebase chars with tokens like {DOT}
+ */
+function encodeFirebaseMessage(raw) {
+    if (raw === null || raw === undefined) return "";
+    let s = String(raw);
+
+    // encode control chars first
+    s = s.replace(/[\x00-\x1F\x7F]/g, function (ch) {
+        const code = ch.charCodeAt(0);
+        return `{0x${code.toString(16).toUpperCase().padStart(2, "0")}}`;
+    });
+
+    // replace forbidden characters
+    for (const ch in FIREBASE_ESCAPE_MAP) {
+        const token = FIREBASE_ESCAPE_MAP[ch];
+        s = s.split(ch).join(token);
+    }
+    return s;
+}
+
 // simple debounce
 function debounce(fn, wait = 300) {
     let to;
@@ -202,7 +263,8 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
         const r = obj[key] || {};
         if (!statusMatches(r)) continue;
 
-        const msg = (r.message || "").toString().toLowerCase();
+        // decode message for accurate search
+        const msg = decodeFirebaseMessage(r.message || "").toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
 
@@ -320,7 +382,9 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
 
-    const safeMessage = (report && report.message) ? escapeHtml(report.message) : "(Không có nội dung)";
+    // decode message and response for display, then escape for HTML
+    const rawMessage = (report && report.message) ? decodeFirebaseMessage(report.message) : "(Không có nội dung)";
+    const safeMessage = escapeHtml(rawMessage);
     const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
 
     const responded = !!(report && (report.responded || report.response));
@@ -329,7 +393,8 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     else if (report && report.response && report.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
     else if (responded) responseType = "reply";
 
-    const responseText = (report && report.response) ? escapeHtml(report.response) : "";
+    const rawResponse = (report && report.response) ? decodeFirebaseMessage(report.response) : "";
+    const responseText = escapeHtml(rawResponse);
 
     card.innerHTML = `
         <div class="top-section">
@@ -645,9 +710,13 @@ async function loadReports() {
 
 async function respondToReport(playerName, responseText, responseType = "reply") {
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
+
+    // encode responseText before sending
+    const encodedResponse = encodeFirebaseMessage(responseText);
+
     const payload = {
         responded: true,
-        response: responseText,
+        response: encodedResponse,
         respondedAt: Date.now(),
         responseType: responseType
     };
