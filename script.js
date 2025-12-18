@@ -997,12 +997,10 @@ document.addEventListener("DOMContentLoaded", bindReportsFilter);
 
 // ---------- Members filter UI binding ----------
 function bindMembersFilterUI() {
-    if (memberFilterContainer) return; // already bound
-    // Try to find page-members controls area
+    if (memberFilterContainer) return;
     const controls = pageMembers && pageMembers.querySelector ? pageMembers.querySelector(".page-controls") : null;
     if (!controls) return;
 
-    // create filter container
     const container = document.createElement("div");
     container.className = "members-filter";
     container.style.display = "flex";
@@ -1016,38 +1014,26 @@ function bindMembersFilterUI() {
     label.style.fontSize = "13px";
     container.appendChild(label);
 
-    const btnAll = document.createElement("button");
-    btnAll.className = "member-filter-btn active";
-    btnAll.setAttribute("data-filter", "all");
-    btnAll.textContent = "All";
-    const btnOnline = document.createElement("button");
-    btnOnline.className = "member-filter-btn";
-    btnOnline.setAttribute("data-filter", "online");
-    btnOnline.textContent = "Online";
-    const btnOffline = document.createElement("button");
-    btnOffline.className = "member-filter-btn";
-    btnOffline.setAttribute("data-filter", "offline");
-    btnOffline.textContent = "Offline";
+    const makeBtn = (filter, text, active = false) => {
+        const b = document.createElement("button");
+        b.className = "member-filter-btn" + (active ? " active" : "");
+        b.setAttribute("data-filter", filter);
+        b.type = "button";
+        b.textContent = text;
+        return b;
+    };
 
-    // simple styling for small buttons (you can adjust CSS)
-    [btnAll, btnOnline, btnOffline].forEach(b => {
-        b.style.padding = "6px 10px";
-        b.style.borderRadius = "6px";
-        b.style.border = "1px solid rgba(255,255,255,0.04)";
-        b.style.background = "transparent";
-        b.style.cursor = "pointer";
-    });
-    btnAll.style.fontWeight = "600";
+    const btnAll = makeBtn("all", "All", true);
+    const btnOnline = makeBtn("online", "Online");
+    const btnOffline = makeBtn("offline", "Offline");
 
     container.appendChild(btnAll);
     container.appendChild(btnOnline);
     container.appendChild(btnOffline);
 
-    // insert container into controls (placed after search input)
     controls.appendChild(container);
     memberFilterContainer = container;
 
-    // click handler
     container.addEventListener("click", (ev) => {
         const t = ev.target;
         const btn = (t && typeof t.closest === "function") ? t.closest(".member-filter-btn") : null;
@@ -1055,10 +1041,8 @@ function bindMembersFilterUI() {
         const filter = btn.getAttribute("data-filter");
         if (!filter) return;
         currentMemberStatusFilter = filter;
-        // update active classes
         const all = container.querySelectorAll(".member-filter-btn");
         all.forEach(b => b.classList.toggle("active", b === btn));
-        // re-run members search/render with current search and filters
         const q = (searchMembersInput && searchMembersInput.value || "").trim();
         const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
         const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
