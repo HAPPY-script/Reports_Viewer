@@ -46,6 +46,10 @@ const gameListEl = document.getElementById("game-list");
 let reportsFilterEl = document.getElementById("reports-filter");
 let currentReportFilter = "all"; // possible values: "all","unresolved","resolved","deleted","responded"
 
+// Member status filter
+let memberFilterContainer = null;
+let currentMemberStatusFilter = "all"; // "all" | "online" | "offline"
+
 let selectedPlayer = null;
 let cachedReports = null;
 let cachedMembers = null;
@@ -54,6 +58,7 @@ const avatarPromiseCache = {};
 const DEFAULT_DELETE_RESPONSE = "The admin has reviewed your comment but has not responded.";
 
 const HOURS72_MS = 72 * 3600 * 1000;
+const MEMBER_ONLINE_TIMEOUT_MS = 120 * 1000; // 120 seconds timeout (adjustable)
 
 // ---------- utilities ----------
 function escapeHtml(unsafe) {
@@ -99,7 +104,7 @@ async function fetchAvatarImageUrl(userId, size = "150x150") {
     return p;
 }
 
-// ---------- FIREBASE ESCAPE/UNESCAPE (CLIENT SIDE) ----------
+// FIREBASE ESCAPE/UNESCAPE (CLIENT SIDE)
 const FIREBASE_ESCAPE_MAP = {
     ".": "{DOT}",
     "#": "{HASH}",
@@ -114,45 +119,29 @@ for (const k in FIREBASE_ESCAPE_MAP) FIREBASE_UNESCAPE_MAP[FIREBASE_ESCAPE_MAP[k
 
 /**
  * decodeFirebaseMessage(encoded)
- * - decode tokens {0xNN} to raw control char
- * - decode tokens like {DOT} back to '.'
  */
 function decodeFirebaseMessage(encoded) {
     if (!encoded) return "";
     let s = String(encoded);
-
-    // decode {0xNN} -> char
     s = s.replace(/\{0x([0-9A-Fa-f]{2})\}/g, function (_, hex) {
         const code = parseInt(hex, 16);
         if (!Number.isNaN(code)) return String.fromCharCode(code);
         return "";
     });
-
-    // decode token map
     for (const token in FIREBASE_UNESCAPE_MAP) {
         const ch = FIREBASE_UNESCAPE_MAP[token];
         s = s.split(token).join(ch);
     }
-
     return s;
 }
 
-/**
- * encodeFirebaseMessage(raw)
- * - encode control chars (0x00-0x1F and 0x7F) as {0xNN}
- * - replace forbidden firebase chars with tokens like {DOT}
- */
 function encodeFirebaseMessage(raw) {
     if (raw === null || raw === undefined) return "";
     let s = String(raw);
-
-    // encode control chars first
     s = s.replace(/[\x00-\x1F\x7F]/g, function (ch) {
         const code = ch.charCodeAt(0);
         return `{0x${code.toString(16).toUpperCase().padStart(2, "0")}}`;
     });
-
-    // replace forbidden characters
     for (const ch in FIREBASE_ESCAPE_MAP) {
         const token = FIREBASE_ESCAPE_MAP[ch];
         s = s.split(ch).join(token);
@@ -196,23 +185,17 @@ function isNumericString(s) {
 }
 
 /*
-  filterReportsObject(obj, query, statusFilter)
-
-  - query: supports "/<n>" (line search).
-  - statusFilter: "all" | "unresolved" | "resolved" | "deleted" | "responded"
+  filterReportsObject(...)  (unchanged logic from before)
 */
 async function filterReportsObject(obj, query, statusFilter = "all") {
     if (!obj) return {};
-
     const sf = (statusFilter || "all").toString().toLowerCase();
-
     function statusMatches(r) {
         const responded = !!(r && (r.responded || r.response));
         let responseType = null;
         if (r && r.responseType) responseType = String(r.responseType);
         else if (r && r.response && r.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
         else if (responded) responseType = "reply";
-
         if (sf === "all") return true;
         if (sf === "unresolved") return !responded;
         if (sf === "resolved") return responded;
@@ -220,10 +203,7 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
         if (sf === "responded") return responseType === "reply";
         return true;
     }
-
     const raw = (query || "").toString().trim();
-
-    // If no query (empty) -> return all reports that match status
     if (!raw) {
         const out = {};
         for (const k of Object.keys(obj)) {
@@ -232,13 +212,10 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
         }
         return out;
     }
-
-    // line-search "/<n>" -> apply status filter then pick nth in ordered list
     const lineMatch = raw.match(/^\/\s*(\d+)\s*$/);
     if (lineMatch) {
         const n = parseInt(lineMatch[1], 10);
         if (!Number.isFinite(n) || n <= 0) return {};
-        // build ordered keys: unresponded first then responded
         const unrespKeys = [];
         const respKeys = [];
         for (const key of Object.keys(obj)) {
@@ -247,78 +224,64 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
             if (responded) respKeys.push(key); else unrespKeys.push(key);
         }
         const allKeys = unrespKeys.concat(respKeys);
-        // apply status filter to ordering
         const filteredKeys = allKeys.filter(k => statusMatches(obj[k] || {}));
         if (n > filteredKeys.length) return {};
         const pick = filteredKeys[n - 1];
         if (!pick) return {};
         return { [pick]: obj[pick] };
     }
-
-    // normal search + status filter
     const q = raw.toLowerCase();
     const numeric = isNumericString(q) ? q : null;
     const out = {};
     for (const key of Object.keys(obj)) {
         const r = obj[key] || {};
         if (!statusMatches(r)) continue;
-
-        // decode message for accurate search
         const msg = decodeFirebaseMessage(r.message || "").toLowerCase();
         const username = key.toLowerCase();
         const userIdFromReport = r.userId ? String(r.userId) : null;
-
         let matched = false;
         if (username.includes(q)) matched = true;
         else if (msg.includes(q)) matched = true;
         else if (numeric && userIdFromReport && userIdFromReport.includes(numeric)) matched = true;
         else if (numeric && key.includes(numeric)) matched = true;
-
         if (matched) out[key] = r;
     }
     return out;
 }
 
-/* members filter unchanged (kept concise here) */
-function filterMembersObject(obj, query, minGames, maxGames) {
+/*
+  filterMembersObject(obj, query, minGames, maxGames, statusFilter)
+  - statusFilter: "all" | "online" | "offline"
+*/
+function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all") {
     if (!obj) return {};
     const rawQuery = (query || "").trim();
-
     const lineMatch = rawQuery.match(/^\/\s*(\d+)\s*$/);
-    if (lineMatch) {
-        const n = parseInt(lineMatch[1], 10);
-        if (!Number.isFinite(n) || n <= 0) return {};
-        const allKeys = Object.keys(obj);
-        if (n > allKeys.length) return {};
-        const pickKey = allKeys[n - 1];
+    const nowMs = Date.now();
+    const sf = (statusFilter || "all").toString().toLowerCase();
 
-        let min = Number.NEGATIVE_INFINITY;
-        let max = Number.POSITIVE_INFINITY;
-        if (minGames !== null && String(minGames).trim() !== "") {
-            const v = parseInt(String(minGames).trim(), 10);
-            if (!Number.isNaN(v)) min = v;
-        }
-        if (maxGames !== null && String(maxGames).trim() !== "") {
-            const v = parseInt(String(maxGames).trim(), 10);
-            if (!Number.isNaN(v)) max = v;
-        }
-        if (min > max) { const t = min; min = max; max = t; }
-
-        const data = obj[pickKey];
-        const gamesObj = data && data.Games ? data.Games : {};
-        const count = Object.keys(gamesObj).length;
-        if (count < min || count > max) return {};
-        const o = {};
-        o[pickKey] = data;
-        return o;
+    // helper to test online using member.Online + LastSeen (LastSeen is in seconds from Lua)
+    function isMemberOnline(member) {
+        if (!member) return false;
+        if (member.Online !== true) return false;
+        if (!member.LastSeen) return false;
+        const lastMs = Number(member.LastSeen) * 1000;
+        if (Number.isNaN(lastMs)) return false;
+        return (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS;
     }
 
-    const q = rawQuery.toLowerCase();
-    const numericQuery = /^\d+$/.test(q) ? q : null;
+    // apply status filter function
+    function statusMatches(member) {
+        if (sf === "all") return true;
+        const online = isMemberOnline(member);
+        if (sf === "online") return online === true;
+        if (sf === "offline") return online === false;
+        return true;
+    }
 
+    // parse min/max
     let min = Number.NEGATIVE_INFINITY;
     let max = Number.POSITIVE_INFINITY;
-
     if (minGames !== null && String(minGames).trim() !== "") {
         const v = parseInt(String(minGames).trim(), 10);
         if (!Number.isNaN(v)) min = v;
@@ -329,26 +292,41 @@ function filterMembersObject(obj, query, minGames, maxGames) {
     }
     if (min > max) { const t = min; min = max; max = t; }
 
+    if (lineMatch) {
+        const n = parseInt(lineMatch[1], 10);
+        if (!Number.isFinite(n) || n <= 0) return {};
+        const allKeys = Object.keys(obj);
+        if (n > allKeys.length) return {};
+        const pickKey = allKeys[n - 1];
+        const data = obj[pickKey];
+        if (!statusMatches(data)) return {};
+        const gamesObj = data && data.Games ? data.Games : {};
+        const count = Object.keys(gamesObj).length;
+        if (count < min || count > max) return {};
+        const o = {};
+        o[pickKey] = data;
+        return o;
+    }
+
+    const q = rawQuery.toLowerCase();
+    const numericQuery = /^\d+$/.test(q) ? q : null;
     const out = {};
     for (const username of Object.keys(obj)) {
         const data = obj[username] || {};
+        if (!statusMatches(data)) continue;
         const uid = data.ID ? String(data.ID) : "";
         const gamesObj = data.Games || {};
         const gameKeys = Object.keys(gamesObj);
         const count = gameKeys.length;
-
         if (count < min || count > max) continue;
-
         if (!q) {
             out[username] = data;
             continue;
         }
-
         if (username.toLowerCase().includes(q) || uid.includes(q)) {
             out[username] = data;
             continue;
         }
-
         let matched = false;
         for (const gk of gameKeys) {
             const gkl = gk.toLowerCase();
@@ -381,18 +359,14 @@ function makeNumberedRow(number, innerCard) {
 function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     const card = document.createElement("div");
     card.className = "card";
-
-    // decode message and response for display, then escape for HTML
     const rawMessage = (report && report.message) ? decodeFirebaseMessage(report.message) : "(Không có nội dung)";
     const safeMessage = escapeHtml(rawMessage);
     const tsText = report && report.timestamp ? formatDate(report.timestamp) : "";
-
     const responded = !!(report && (report.responded || report.response));
     let responseType = null;
     if (report && report.responseType) responseType = String(report.responseType);
     else if (report && report.response && report.response === DEFAULT_DELETE_RESPONSE) responseType = "delete";
     else if (responded) responseType = "reply";
-
     const rawResponse = (report && report.response) ? decodeFirebaseMessage(report.response) : "";
     const responseText = escapeHtml(rawResponse);
 
@@ -461,7 +435,6 @@ function createReportCard(playerKey, report, avatarUrl, userId, index = null) {
     actions.appendChild(btnDelete);
     card.appendChild(actions);
 
-    // copy name/id handlers
     const nameEl = card.querySelector(".name");
     if (nameEl) {
         nameEl.style.cursor = "pointer";
@@ -506,7 +479,6 @@ async function renderReports(dataObj) {
         reportContainer.innerHTML = "<div class='loading'>Không có report nào.</div>";
         return;
     }
-
     cleanupOldResponded(dataObj).catch(err=>console.warn("cleanup error", err));
 
     const unrespKeys = [];
@@ -516,9 +488,9 @@ async function renderReports(dataObj) {
         const responded = !!(r.responded || r.response);
         if (responded) respKeys.push(key); else unrespKeys.push(key);
     }
-
     const allKeys = unrespKeys.concat(respKeys);
 
+    const frag = document.createDocumentFragment();
     let idx = 1;
     for (const playerKey of allKeys) {
         const report = dataObj[playerKey];
@@ -532,26 +504,47 @@ async function renderReports(dataObj) {
             } catch (e) {}
         }
         const numbered = createReportCard(playerKey, report, avatarUrl, userId, idx);
-        reportContainer.appendChild(numbered);
+        frag.appendChild(numbered);
         idx++;
     }
+    reportContainer.appendChild(frag);
 }
 
-// Member card functions kept the same (unchanged)
-function createMemberCard(username, data, index = null) {
+// Member card (updated to include status)
+function createMemberCard(username, data, index = null, nowMs = Date.now()) {
     const divCard = document.createElement("div");
     divCard.className = "member-card";
 
     const userId = (data && data.ID) ? data.ID : null;
+    // use direct constructed thumbnail (fast)
     const avatarUrl = userId ? (`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=100&height=100&format=Png`) : 'https://www.roblox.com/headshot-thumbnail/image?userId=1&width=100&height=100&format=Png';
 
     const gameCount = data && data.Games ? Object.keys(data.Games).length : 0;
     const gamesText = `Games: ${gameCount}`;
 
+    // determine online based on Online && LastSeen freshness
+    let isOnline = false;
+    if (data && data.Online === true && data.LastSeen) {
+        const lastMs = Number(data.LastSeen) * 1000;
+        if (!Number.isNaN(lastMs) && (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS) {
+            isOnline = true;
+        }
+    }
+
+    const statusClass = isOnline ? "status-online" : "status-offline";
+    const statusText = isOnline ? "Online" : "Offline";
+
+    // build inner html: avatar, meta, status
     divCard.innerHTML = `
         <img class="mavatar" src="${avatarUrl}" onerror="this.onerror=null;this.src='https://www.roblox.com/headshot-thumbnail/image?userId=1&width=100&height=100&format=Png'">
         <div class="mmeta">
-            <div class="mname">${escapeHtml(username)}${userId ? ` • ${userId}` : ''}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="mname">${escapeHtml(username)}${userId ? ` • ${userId}` : ''}</div>
+              <div class="mstatus ${statusClass}">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span class="status-text">${statusText}</span>
+              </div>
+            </div>
             <div class="mgames">${escapeHtml(gamesText)}</div>
         </div>
     `;
@@ -583,14 +576,34 @@ async function renderMembers(dataObj) {
         memberContainer.innerHTML = "<div class='loading'>Chưa có thành viên nào.</div>";
         return;
     }
-    const keys = Object.keys(dataObj);
+
+    // Build entries array for sorting + efficient render
+    const nowMs = Date.now();
+    const entries = Object.keys(dataObj).map(username => {
+        const data = dataObj[username] || {};
+        const gameCount = data && data.Games ? Object.keys(data.Games).length : 0;
+        const lastMs = data && data.LastSeen ? Number(data.LastSeen) * 1000 : 0;
+        const isOnline = (data && data.Online === true && lastMs && !Number.isNaN(lastMs) && (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS) ? true : false;
+        return { username, data, gameCount, isOnline };
+    });
+
+    // sort: online first, then offline; inside groups: gameCount desc, username asc
+    entries.sort((a,b) => {
+        if (a.isOnline && !b.isOnline) return -1;
+        if (!a.isOnline && b.isOnline) return 1;
+        if (b.gameCount !== a.gameCount) return b.gameCount - a.gameCount;
+        return a.username.localeCompare(b.username);
+    });
+
+    const frag = document.createDocumentFragment();
     let idx = 1;
-    for (const username of keys) {
-        const info = dataObj[username];
-        const numbered = createMemberCard(username, info, idx);
-        memberContainer.appendChild(numbered);
+    for (const e of entries) {
+        const node = createMemberCard(e.username, e.data, idx, nowMs);
+        frag.appendChild(node);
         idx++;
     }
+
+    memberContainer.appendChild(frag);
 }
 
 // ---------- Member modal & game fetching (unchanged) ----------
@@ -696,7 +709,6 @@ async function loadReports() {
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedReports = json || {};
-        // ensure filter UI is bound
         bindReportsFilter();
         const q = (searchReportsInput && searchReportsInput.value || "").trim();
         const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
@@ -710,10 +722,7 @@ async function loadReports() {
 
 async function respondToReport(playerName, responseText, responseType = "reply") {
     const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
-
-    // encode responseText before sending
     const encodedResponse = encodeFirebaseMessage(responseText);
-
     const payload = {
         responded: true,
         response: encodedResponse,
@@ -784,10 +793,12 @@ async function loadMembers() {
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedMembers = json || {};
+        // ensure members filter UI is bound
+        bindMembersFilterUI();
         const q = (searchMembersInput && searchMembersInput.value || "").trim();
         const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
         const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-        const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
+        const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
         await renderMembers(filtered);
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
     } catch (err) {
@@ -859,7 +870,7 @@ async function autoLoadMembers(interval = 12000) {
                     const q = (searchMembersInput && searchMembersInput.value || "").trim();
                     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
                     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-                    const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
+                    const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
                     await renderMembers(filtered);
                 }
             }
@@ -935,7 +946,7 @@ const onSearchMembers = debounce(async () => {
     const q = (searchMembersInput && searchMembersInput.value || "").trim();
     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
+    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
     await renderMembers(filtered);
     if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 }, 300);
@@ -943,7 +954,7 @@ const onSearchMembers = debounce(async () => {
 searchReportsInput && searchReportsInput.addEventListener("input", onSearchReports);
 searchMembersInput && searchMembersInput.addEventListener("input", onSearchMembers);
 
-// Helper: apply search + currentReportFilter and render
+// Helper: apply search + current report filter and render
 async function filterAndRenderReports(q) {
     const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
     await renderReports(filtered);
@@ -965,19 +976,13 @@ function bindReportsFilter() {
         if (!btn) return;
         const f = btn.getAttribute("data-filter");
         if (!f) return;
-
         currentReportFilter = f;
-
-        // update active class
         const allBtns = reportsFilterEl.querySelectorAll(".filter-btn");
         allBtns.forEach(b => b.classList.toggle("active", b === btn));
-
-        // re-render using current search
         const q = (searchReportsInput && searchReportsInput.value || "").trim();
         filterAndRenderReports(q);
     });
 
-    // if initial active class set in HTML, sync currentReportFilter with it
     const initialActive = reportsFilterEl.querySelector(".filter-btn.active");
     if (initialActive) {
         const init = initialActive.getAttribute("data-filter");
@@ -987,16 +992,92 @@ function bindReportsFilter() {
     reportsFilterBound = true;
 }
 
-// try immediate bind and also bind on DOMContentLoaded
 bindReportsFilter();
 document.addEventListener("DOMContentLoaded", bindReportsFilter);
+
+// ---------- Members filter UI binding ----------
+function bindMembersFilterUI() {
+    if (memberFilterContainer) return; // already bound
+    // Try to find page-members controls area
+    const controls = pageMembers && pageMembers.querySelector ? pageMembers.querySelector(".page-controls") : null;
+    if (!controls) return;
+
+    // create filter container
+    const container = document.createElement("div");
+    container.className = "members-filter";
+    container.style.display = "flex";
+    container.style.gap = "8px";
+    container.style.alignItems = "center";
+    container.style.marginLeft = "12px";
+
+    const label = document.createElement("div");
+    label.textContent = "Status:";
+    label.style.color = "rgba(200,200,255,0.6)";
+    label.style.fontSize = "13px";
+    container.appendChild(label);
+
+    const btnAll = document.createElement("button");
+    btnAll.className = "member-filter-btn active";
+    btnAll.setAttribute("data-filter", "all");
+    btnAll.textContent = "All";
+    const btnOnline = document.createElement("button");
+    btnOnline.className = "member-filter-btn";
+    btnOnline.setAttribute("data-filter", "online");
+    btnOnline.textContent = "Online";
+    const btnOffline = document.createElement("button");
+    btnOffline.className = "member-filter-btn";
+    btnOffline.setAttribute("data-filter", "offline");
+    btnOffline.textContent = "Offline";
+
+    // simple styling for small buttons (you can adjust CSS)
+    [btnAll, btnOnline, btnOffline].forEach(b => {
+        b.style.padding = "6px 10px";
+        b.style.borderRadius = "6px";
+        b.style.border = "1px solid rgba(255,255,255,0.04)";
+        b.style.background = "transparent";
+        b.style.cursor = "pointer";
+    });
+    btnAll.style.fontWeight = "600";
+
+    container.appendChild(btnAll);
+    container.appendChild(btnOnline);
+    container.appendChild(btnOffline);
+
+    // insert container into controls (placed after search input)
+    controls.appendChild(container);
+    memberFilterContainer = container;
+
+    // click handler
+    container.addEventListener("click", (ev) => {
+        const t = ev.target;
+        const btn = (t && typeof t.closest === "function") ? t.closest(".member-filter-btn") : null;
+        if (!btn) return;
+        const filter = btn.getAttribute("data-filter");
+        if (!filter) return;
+        currentMemberStatusFilter = filter;
+        // update active classes
+        const all = container.querySelectorAll(".member-filter-btn");
+        all.forEach(b => b.classList.toggle("active", b === btn));
+        // re-run members search/render with current search and filters
+        const q = (searchMembersInput && searchMembersInput.value || "").trim();
+        const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+        const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
+        const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+        renderMembers(filtered);
+        if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
+    });
+}
+
+// try immediate bind (if DOM available) and also on DOMContentLoaded
+bindMembersFilterUI();
+document.addEventListener("DOMContentLoaded", bindMembersFilterUI);
 
 // filter apply/clear for members
 applyFilterBtn && applyFilterBtn.addEventListener("click", async () => {
     const q = (searchMembersInput && searchMembersInput.value || "").trim();
     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal);
+    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
     await renderMembers(filtered);
     if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
 });
