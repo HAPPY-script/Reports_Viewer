@@ -595,3 +595,119 @@ body {
   border-color: #ff4b4b;
   box-shadow: 0 6px 18px rgba(255,60,60,0.06);
 }
+
+/* ===========================================================
+   Additional styles for Member status badge + Member filters
+   Append this block to the end of your existing style.css
+   =========================================================== */
+
+/* Status badge inside member-card (dot + label) */
+.mstatus {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    margin-left: 8px; /* small separation from name */
+    margin-bottom: 0;
+    font-size: 13px;
+    line-height: 1;
+    user-select: none;
+}
+.mstatus .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 6px rgba(0,0,0,0.55), inset 0 -1px 1px rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.04);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.mstatus .status-text {
+    font-weight: 600;
+    color: rgba(220,220,255,0.9);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+/* Online / Offline color variants (matching theme) */
+.status-online .status-dot { background: linear-gradient(180deg,#2ce57a,#0fb86a); box-shadow: 0 6px 18px rgba(75,235,140,0.12); }
+.status-online .status-text { color: #bfffe0; }
+
+.status-offline .status-dot { background: linear-gradient(180deg,#ff6b6b,#d94b4b); box-shadow: 0 6px 18px rgba(255,107,107,0.08); }
+.status-offline .status-text { color: rgba(255,200,200,0.9); }
+
+/* Slight hover effect for clickable member cards */
+.member-card:hover .mstatus .status-dot { transform: scale(1.08); }
+
+/* Members filter container (injected by JS) */
+.members-filter {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    margin-left: 6px;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+/* small member-filter buttons */
+.member-filter-btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255,255,255,0.9);
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+    transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.member-filter-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(60,60,255,0.04); }
+.member-filter-btn.active {
+    background: linear-gradient(90deg,#556bff22,#44ff8a22);
+    border-color: #6b4bff;
+    box-shadow: 0 6px 18px rgba(60,90,255,0.06);
+    color: #ffffff;
+}
+
+/* offline variant for active 'deleted' like tone (if needed) */
+.member-filter-btn[data-filter="offline"].active {
+    background: linear-gradient(90deg,#ff556622,#ff8a4444);
+    border-color: #ff4b4b;
+}
+
+/* Ensure mmeta top-row layout supports status badge without breaking */
+.member-card .mmeta > div { width:100%; }
+.member-card .mmeta > div[style] { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+
+/* Reduce visual density when many items (optional, non-invasive) */
+.member-card {
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+/* Make status label smaller on very small screens */
+@media (max-width:520px) {
+    .mstatus .status-text { display:none; } /* show only dot on tiny screens */
+    .members-filter { margin-left:0; width:100%; gap:6px; }
+}
+
+/* Accessibility: focus outline for filter buttons */
+.member-filter-btn:focus {
+    outline: 3px solid rgba(100,100,255,0.14);
+    outline-offset: 2px;
+}
+
+/* Integration hint: if you want a muted text variable, define here (non-breaking fallback) */
+:root {
+    --muted-text: rgba(200,200,220,0.72);
+}
+
+/* keep small spacing consistency for .mname block when status present */
+.member-card .mname {
+    display:inline-block;
+    max-width: calc(100% - 120px); /* prevent name overlap with status on narrow cards */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* If you later enable virtualization, ensure .member-card has stable height:
+   .member-card { min-height:64px; }  (commented out to keep your original look) */
