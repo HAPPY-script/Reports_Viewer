@@ -709,5 +709,12 @@ body {
     white-space: nowrap;
 }
 
-/* If you later enable virtualization, ensure .member-card has stable height:
-   .member-card { min-height:64px; }  (commented out to keep your original look) */
+/* ===========================================================
+   Members container scroll (for infinite scroll)
+   =========================================================== */
+
+#member-container {
+    overflow-y: auto;
+    max-height: calc(100vh - 260px);
+    padding-right: 6px; /* tránh scrollbar đè nội dung */
+}
