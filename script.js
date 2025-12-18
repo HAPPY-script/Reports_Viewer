@@ -1,3 +1,9 @@
+// Pagination / infinite scroll state for members
+const MEMBERS_PAGE_SIZE = 100;
+let membersRenderIndex = 0;        // next index to render (0-based)
+let membersRenderList = [];        // array of {username,data,gameCount,isOnline}
+let membersLoadingMore = false;
+
 // CONFIG
 const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
 const API_URL_REPORTS = API_BASE_REPORTS + ".json";
@@ -510,6 +516,46 @@ async function renderReports(dataObj) {
     reportContainer.appendChild(frag);
 }
 
+function prepareMembersList(filteredObj) {
+    if (!filteredObj) return [];
+    const nowMs = Date.now();
+    const list = Object.keys(filteredObj).map(username => {
+        const data = filteredObj[username] || {};
+        const gameCount = data && data.Games ? Object.keys(data.Games).length : 0;
+        const lastMs = data && data.LastSeen ? Number(data.LastSeen) * 1000 : 0;
+        const isOnline = (data && data.Online === true && lastMs && !Number.isNaN(lastMs) && (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS) ? true : false;
+        return { username, data, gameCount, isOnline };
+    });
+
+    list.sort((a,b) => {
+        if (a.isOnline && !b.isOnline) return -1;
+        if (!a.isOnline && b.isOnline) return 1;
+        if (b.gameCount !== a.gameCount) return b.gameCount - a.gameCount;
+        return a.username.localeCompare(b.username);
+    });
+    return list;
+}
+
+function renderMembersChunk() {
+    if (!memberContainer) return;
+    if (membersLoadingMore) return;
+    if (membersRenderIndex >= membersRenderList.length) return;
+
+    membersLoadingMore = true;
+    const frag = document.createDocumentFragment();
+    const nowMs = Date.now();
+
+    const end = Math.min(membersRenderIndex + MEMBERS_PAGE_SIZE, membersRenderList.length);
+    for (let i = membersRenderIndex; i < end; i++) {
+        const e = membersRenderList[i];
+        // createMemberCard uses index parameter for numbered rows; we pass (i+1) to show correct overall index
+        frag.appendChild(createMemberCard(e.username, e.data, i + 1, nowMs));
+    }
+    membersRenderIndex = end;
+    memberContainer.appendChild(frag);
+    membersLoadingMore = false;
+}
+
 // Member card (updated to include status)
 function createMemberCard(username, data, index = null, nowMs = Date.now()) {
     const divCard = document.createElement("div");
@@ -571,40 +617,18 @@ function createMemberCard(username, data, index = null, nowMs = Date.now()) {
 
 async function renderMembers(dataObj) {
     if (!memberContainer) return;
-    memberContainer.innerHTML = "";
     if (!dataObj || Object.keys(dataObj).length === 0) {
         memberContainer.innerHTML = "<div class='loading'>Chưa có thành viên nào.</div>";
         return;
     }
 
-    // Build entries array for sorting + efficient render
-    const nowMs = Date.now();
-    const entries = Object.keys(dataObj).map(username => {
-        const data = dataObj[username] || {};
-        const gameCount = data && data.Games ? Object.keys(data.Games).length : 0;
-        const lastMs = data && data.LastSeen ? Number(data.LastSeen) * 1000 : 0;
-        const isOnline = (data && data.Online === true && lastMs && !Number.isNaN(lastMs) && (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS) ? true : false;
-        return { username, data, gameCount, isOnline };
-    });
-
-    // sort: online first, then offline; inside groups: gameCount desc, username asc
-    entries.sort((a,b) => {
-        if (a.isOnline && !b.isOnline) return -1;
-        if (!a.isOnline && b.isOnline) return 1;
-        if (b.gameCount !== a.gameCount) return b.gameCount - a.gameCount;
-        return a.username.localeCompare(b.username);
-    });
-
-    const frag = document.createDocumentFragment();
-    let idx = 1;
-    for (const e of entries) {
-        const node = createMemberCard(e.username, e.data, idx, nowMs);
-        frag.appendChild(node);
-        idx++;
-    }
-
-    memberContainer.appendChild(frag);
+    // prepare and render first chunk
+    membersRenderList = prepareMembersList(dataObj);
+    membersRenderIndex = 0;
+    memberContainer.innerHTML = "";
+    renderMembersChunk();
 }
+
 
 // ---------- Member modal & game fetching (unchanged) ----------
 function extractPlaceIdFromKey(key) {
@@ -793,18 +817,39 @@ async function loadMembers() {
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
         cachedMembers = json || {};
-        // ensure members filter UI is bound
+
         bindMembersFilterUI();
+
+        // apply current filters/search to cachedMembers to produce filtered object
         const q = (searchMembersInput && searchMembersInput.value || "").trim();
         const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
         const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-        const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
-        await renderMembers(filtered);
+        const filteredObj = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+
+        // prepare list and render first chunk only
+        membersRenderList = prepareMembersList(filteredObj);
+        membersRenderIndex = 0;
+        memberContainer.innerHTML = "";
+        renderMembersChunk();
+
+        // update counts: updateTabCounts shows total members in tab; membersCountEl shows filtered count
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
+        if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
     } catch (err) {
         memberContainer.innerHTML = "<div class='loading'>Lỗi tải dữ liệu thành viên.</div>";
         console.error(err);
     }
+}
+
+// Ensure memberContainer is scrollable (see CSS note below)
+if (memberContainer) {
+    memberContainer.addEventListener("scroll", () => {
+        // near bottom threshold (200px)
+        const nearBottom = memberContainer.scrollTop + memberContainer.clientHeight >= (memberContainer.scrollHeight - 200);
+        if (nearBottom && membersRenderIndex < membersRenderList.length) {
+            renderMembersChunk();
+        }
+    });
 }
 
 // ---------- counts & polling ----------
@@ -867,11 +912,20 @@ async function autoLoadMembers(interval = 12000) {
             if (JSON.stringify(json || {}) !== JSON.stringify(cachedMembers || {})) {
                 cachedMembers = json || {};
                 if (pageMembers && pageMembers.classList.contains("active")) {
+                    // compute filtered based on current UI values
                     const q = (searchMembersInput && searchMembersInput.value || "").trim();
                     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
                     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-                    const filtered = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
-                    await renderMembers(filtered);
+                    const filteredObj = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+
+                    // reset and render first chunk
+                    membersRenderList = prepareMembersList(filteredObj);
+                    membersRenderIndex = 0;
+                    memberContainer.innerHTML = "";
+                    renderMembersChunk();
+
+                    if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
+                    updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
                 }
             }
         }
@@ -946,9 +1000,13 @@ const onSearchMembers = debounce(async () => {
     const q = (searchMembersInput && searchMembersInput.value || "").trim();
     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
-    await renderMembers(filtered);
-    if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
+    const filteredObj = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+
+    membersRenderList = prepareMembersList(filteredObj);
+    membersRenderIndex = 0;
+    memberContainer.innerHTML = "";
+    renderMembersChunk();
+    if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
 }, 300);
 
 searchReportsInput && searchReportsInput.addEventListener("input", onSearchReports);
@@ -1077,10 +1135,15 @@ applyFilterBtn && applyFilterBtn.addEventListener("click", async () => {
     const q = (searchMembersInput && searchMembersInput.value || "").trim();
     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-    const filtered = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
-    await renderMembers(filtered);
-    if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
+
+    const filteredObj = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+    membersRenderList = prepareMembersList(filteredObj);
+    membersRenderIndex = 0;
+    memberContainer.innerHTML = "";
+    renderMembersChunk();
+    if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
 });
+
 clearFilterBtn && clearFilterBtn.addEventListener("click", async () => {
     if (filterGamesMinInput) filterGamesMinInput.value = "";
     if (filterGamesMaxInput) filterGamesMaxInput.value = "";
