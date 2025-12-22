@@ -5,7 +5,7 @@ let membersLoadingMore = false;
 
 // --- Supabase config (replace if necessary) ---
 const SUPABASE_BASE = "https://koqaxxefwuosiplczazy.supabase.co";
-const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvcWF4eGVmd3Vvc2lwbGN6YXp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyNzA1NDMsImV4cCI6MjA4MTg0NjU0M30.c_hoE6Kr3N9OEgS2WOUlDj-2-EL3H_CRzKO3RLbBlwU";
+const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvcWF4eGVmd3Vvc2lwbGN6YXp5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjI3MDU0MywiZXhwIjoyMDgxODQ2NTQzfQ.r5WrrZURA6Cpn4Ocf7x5mjGnOvOg8VYa0U92Dbgwh2M";
 
 const API_BASE_MEMBER = SUPABASE_BASE + "/rest/v1/members";
 const API_BASE_REPORTS = SUPABASE_BASE + "/rest/v1/reports";
