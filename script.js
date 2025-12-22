@@ -1,16 +1,18 @@
-// Pagination / infinite scroll state for members
 const MEMBERS_PAGE_SIZE = 100;
-let membersRenderIndex = 0;        // next index to render (0-based)
-let membersRenderList = [];        // array of {username,data,gameCount,isOnline}
+let membersRenderIndex = 0;
+let membersRenderList = [];
 let membersLoadingMore = false;
 
-// CONFIG
-const API_BASE_REPORTS = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/reports";
-const API_URL_REPORTS = API_BASE_REPORTS + ".json";
-const API_BASE_MEMBER = "https://happy-script-bada6-default-rtdb.asia-southeast1.firebasedatabase.app/Member";
-const API_URL_MEMBER = API_BASE_MEMBER + ".json";
+// --- Supabase config (replace if necessary) ---
+const SUPABASE_BASE = "https://koqaxxefwuosiplczazy.supabase.co";
+const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvcWF4eGVmd3Vvc2lwbGN6YXp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyNzA1NDMsImV4cCI6MjA4MTg0NjU0M30.c_hoE6Kr3N9OEgS2WOUlDj-2-EL3H_CRzKO3RLbBlwU";
 
-// DOM refs
+const API_BASE_MEMBER = SUPABASE_BASE + "/rest/v1/members";
+const API_BASE_REPORTS = SUPABASE_BASE + "/rest/v1/reports";
+
+/* =======================
+   DOM REFERENCES
+   ======================= */
 const reportContainer = document.getElementById("report-container");
 const memberContainer = document.getElementById("member-container");
 const popup = document.getElementById("confirm-popup");
@@ -32,13 +34,11 @@ const clearFilterBtn = document.getElementById("clear-filter");
 const reportsCountEl = document.getElementById("reports-count");
 const membersCountEl = document.getElementById("members-count");
 
-// Reply modal elements
 const replyModal = document.getElementById("reply-modal");
 const replyText = document.getElementById("reply-text");
 const replySend = document.getElementById("reply-send");
 const replyCancel = document.getElementById("reply-cancel");
 
-// Member modal elements
 const memberModal = document.getElementById("member-modal");
 const memberModalClose = document.getElementById("member-modal-close");
 const memberModalClose2 = document.getElementById("member-modal-close-2");
@@ -48,25 +48,25 @@ const memberUseridEl = document.getElementById("member-userid");
 const memberGamecountEl = document.getElementById("member-gamecount");
 const gameListEl = document.getElementById("game-list");
 
-// Report filter UI element (can be bound later)
 let reportsFilterEl = document.getElementById("reports-filter");
-let currentReportFilter = "all"; // possible values: "all","unresolved","resolved","deleted","responded"
+let currentReportFilter = "all";
 
-// Member status filter
 let memberFilterContainer = null;
-let currentMemberStatusFilter = "all"; // "all" | "online" | "offline"
+let currentMemberStatusFilter = "all";
 
 let selectedPlayer = null;
 let cachedReports = null;
 let cachedMembers = null;
-let pendingConfirmAction = null; // "delete-as-respond" etc
+let pendingConfirmAction = null;
 const avatarPromiseCache = {};
 const DEFAULT_DELETE_RESPONSE = "The admin has reviewed your comment but has not responded.";
 
 const HOURS72_MS = 72 * 3600 * 1000;
-const MEMBER_ONLINE_TIMEOUT_MS = 120 * 1000; // 120 seconds timeout (adjustable)
+const MEMBER_ONLINE_TIMEOUT_MS = 120 * 1000; // 120 seconds
 
-// ---------- utilities ----------
+/* =======================
+   Utilities
+   ======================= */
 function escapeHtml(unsafe) {
     return String(unsafe || "")
         .replace(/&/g, "&amp;")
@@ -110,7 +110,7 @@ async function fetchAvatarImageUrl(userId, size = "150x150") {
     return p;
 }
 
-// FIREBASE ESCAPE/UNESCAPE (CLIENT SIDE)
+/* FIREBASE ESCAPE/UNESCAPE (kept for compatibility with existing messages) */
 const FIREBASE_ESCAPE_MAP = {
     ".": "{DOT}",
     "#": "{HASH}",
@@ -123,9 +123,6 @@ const FIREBASE_ESCAPE_MAP = {
 const FIREBASE_UNESCAPE_MAP = {};
 for (const k in FIREBASE_ESCAPE_MAP) FIREBASE_UNESCAPE_MAP[FIREBASE_ESCAPE_MAP[k]] = k;
 
-/**
- * decodeFirebaseMessage(encoded)
- */
 function decodeFirebaseMessage(encoded) {
     if (!encoded) return "";
     let s = String(encoded);
@@ -140,7 +137,6 @@ function decodeFirebaseMessage(encoded) {
     }
     return s;
 }
-
 function encodeFirebaseMessage(raw) {
     if (raw === null || raw === undefined) return "";
     let s = String(raw);
@@ -155,7 +151,6 @@ function encodeFirebaseMessage(raw) {
     return s;
 }
 
-// simple debounce
 function debounce(fn, wait = 300) {
     let to;
     return (...args) => {
@@ -164,7 +159,64 @@ function debounce(fn, wait = 300) {
     };
 }
 
-// ---------- UI helpers ----------
+/* =======================
+   Supabase REST helpers
+   ======================= */
+function supabaseHeaders(extra = {}) {
+    return Object.assign({
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }, extra || {});
+}
+
+// Convert Supabase rows -> old-style keyed object (username -> data)
+function rowsToMembersObject(rows) {
+    const out = {};
+    if (!Array.isArray(rows)) return out;
+    for (const r of rows) {
+        const key = (r && r.username) ? String(r.username) : (r && r.user_id ? String(r.user_id) : null);
+        if (!key) continue;
+        // games may already be object (jsonb) or JSON string
+        let gamesObj = {};
+        if (r.games == null) gamesObj = {};
+        else if (typeof r.games === "object") gamesObj = r.games;
+        else {
+            try { gamesObj = JSON.parse(r.games); } catch (e) { gamesObj = {}; }
+        }
+        out[key] = {
+            ID: r.user_id || null,
+            Username: r.username || key,
+            Games: gamesObj,
+            Online: r.online === true,
+            LastSeen: r.last_seen || null
+        };
+    }
+    return out;
+}
+function rowsToReportsObject(rows) {
+    const out = {};
+    if (!Array.isArray(rows)) return out;
+    for (const r of rows) {
+        const key = (r && r.player) ? String(r.player) : (r && r.user_id ? String(r.user_id) : null);
+        if (!key) continue;
+        out[key] = {
+            userId: r.user_id || null,
+            message: r.message || "",
+            timestamp: r.timestamp || null,
+            responded: !!r.responded,
+            response: r.response || null,
+            respondedAt: r.responded_at || r.respondedAt || null,
+            responseType: r.response_type || null
+        };
+    }
+    return out;
+}
+
+/* =======================
+   Rendering helpers (unchanged)
+   ======================= */
 function updateTabCounts(reportsCount, membersCount) {
     if (btnReports) btnReports.textContent = reportsCount && reportsCount > 0 ? `Reports (${reportsCount})` : "Reports";
     if (btnMembers) btnMembers.textContent = membersCount && membersCount > 0 ? `Members (${membersCount})` : "Members";
@@ -185,14 +237,13 @@ function showPage(page) {
     }
 }
 
-// ---------- Filtering/Search logic ----------
+/* =======================
+   Filtering / Search (unchanged)
+   ======================= */
 function isNumericString(s) {
     return /^\d+$/.test(String(s).trim());
 }
 
-/*
-  filterReportsObject(...)  (unchanged logic from before)
-*/
 async function filterReportsObject(obj, query, statusFilter = "all") {
     if (!obj) return {};
     const sf = (statusFilter || "all").toString().toLowerCase();
@@ -255,10 +306,6 @@ async function filterReportsObject(obj, query, statusFilter = "all") {
     return out;
 }
 
-/*
-  filterMembersObject(obj, query, minGames, maxGames, statusFilter)
-  - statusFilter: "all" | "online" | "offline"
-*/
 function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all") {
     if (!obj) return {};
     const rawQuery = (query || "").trim();
@@ -266,7 +313,6 @@ function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all
     const nowMs = Date.now();
     const sf = (statusFilter || "all").toString().toLowerCase();
 
-    // helper to test online using member.Online + LastSeen (LastSeen is in seconds from Lua)
     function isMemberOnline(member) {
         if (!member) return false;
         if (member.Online !== true) return false;
@@ -276,7 +322,6 @@ function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all
         return (nowMs - lastMs) <= MEMBER_ONLINE_TIMEOUT_MS;
     }
 
-    // apply status filter function
     function statusMatches(member) {
         if (sf === "all") return true;
         const online = isMemberOnline(member);
@@ -285,7 +330,6 @@ function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all
         return true;
     }
 
-    // parse min/max
     let min = Number.NEGATIVE_INFINITY;
     let max = Number.POSITIVE_INFINITY;
     if (minGames !== null && String(minGames).trim() !== "") {
@@ -350,7 +394,9 @@ function filterMembersObject(obj, query, minGames, maxGames, statusFilter = "all
     return out;
 }
 
-// ---------- Rendering ----------
+/* =======================
+   Rendering / Cards (unchanged)
+   ======================= */
 function makeNumberedRow(number, innerCard) {
     const wrapper = document.createElement("div");
     wrapper.className = "card-row";
@@ -548,7 +594,6 @@ function renderMembersChunk() {
     const end = Math.min(membersRenderIndex + MEMBERS_PAGE_SIZE, membersRenderList.length);
     for (let i = membersRenderIndex; i < end; i++) {
         const e = membersRenderList[i];
-        // createMemberCard uses index parameter for numbered rows; we pass (i+1) to show correct overall index
         frag.appendChild(createMemberCard(e.username, e.data, i + 1, nowMs));
     }
     membersRenderIndex = end;
@@ -556,19 +601,16 @@ function renderMembersChunk() {
     membersLoadingMore = false;
 }
 
-// Member card (updated to include status)
 function createMemberCard(username, data, index = null, nowMs = Date.now()) {
     const divCard = document.createElement("div");
     divCard.className = "member-card";
 
     const userId = (data && data.ID) ? data.ID : null;
-    // use direct constructed thumbnail (fast)
     const avatarUrl = userId ? (`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=100&height=100&format=Png`) : 'https://www.roblox.com/headshot-thumbnail/image?userId=1&width=100&height=100&format=Png';
 
     const gameCount = data && data.Games ? Object.keys(data.Games).length : 0;
     const gamesText = `Games: ${gameCount}`;
 
-    // determine online based on Online && LastSeen freshness
     let isOnline = false;
     if (data && data.Online === true && data.LastSeen) {
         const lastMs = Number(data.LastSeen) * 1000;
@@ -580,7 +622,6 @@ function createMemberCard(username, data, index = null, nowMs = Date.now()) {
     const statusClass = isOnline ? "status-online" : "status-offline";
     const statusText = isOnline ? "Online" : "Offline";
 
-    // build inner html: avatar, meta, status
     divCard.innerHTML = `
         <img class="mavatar" src="${avatarUrl}" onerror="this.onerror=null;this.src='https://www.roblox.com/headshot-thumbnail/image?userId=1&width=100&height=100&format=Png'">
         <div class="mmeta">
@@ -622,15 +663,15 @@ async function renderMembers(dataObj) {
         return;
     }
 
-    // prepare and render first chunk
     membersRenderList = prepareMembersList(dataObj);
     membersRenderIndex = 0;
     memberContainer.innerHTML = "";
     renderMembersChunk();
 }
 
-
-// ---------- Member modal & game fetching (unchanged) ----------
+/* =======================
+   Member modal / game fetch
+   ======================= */
 function extractPlaceIdFromKey(key) {
     if (!key) return null;
     const m = key.match(/\((\d+)\)\s*$/);
@@ -724,15 +765,19 @@ function makeGameItem(gameName, placeId, iconUrl) {
     return item;
 }
 
-// ---------- Load / delete / respond ----------
+/* =======================
+   Load / Respond / Delete (Supabase)
+   ======================= */
 async function loadReports() {
     if (!reportContainer) return;
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
-        const res = await fetch(API_URL_REPORTS);
-        if (!res.ok) throw new Error("Fetch failed");
-        const json = await res.json();
-        cachedReports = json || {};
+        const url = `${API_BASE_REPORTS}?select=*`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
+        if (!res.ok) throw new Error("Fetch failed: " + res.status);
+        const rows = await res.json();
+        cachedReports = rowsToReportsObject(rows);
+
         bindReportsFilter();
         const q = (searchReportsInput && searchReportsInput.value || "").trim();
         const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
@@ -745,21 +790,21 @@ async function loadReports() {
 }
 
 async function respondToReport(playerName, responseText, responseType = "reply") {
-    const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     const encodedResponse = encodeFirebaseMessage(responseText);
     const payload = {
         responded: true,
         response: encodedResponse,
-        respondedAt: Date.now(),
-        responseType: responseType
+        responded_at: Date.now(),
+        response_type: responseType
     };
     try {
+        const url = `${API_BASE_REPORTS}?player=eq.${encodeURIComponent(playerName)}`;
         const res = await fetch(url, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            headers: supabaseHeaders(),
             body: JSON.stringify(payload)
         });
-        if (!res.ok) throw new Error("respond failed");
+        if (!res.ok) throw new Error("respond failed: " + res.status);
         await quickRefreshCounts();
         await loadReports();
         return true;
@@ -771,10 +816,13 @@ async function respondToReport(playerName, responseText, responseType = "reply")
 }
 
 async function removeReportCompletely(playerName) {
-    const url = `${API_BASE_REPORTS}/${encodeURIComponent(playerName)}.json`;
     try {
-        const res = await fetch(url, { method: "DELETE" });
-        if (!res.ok) throw new Error("delete failed");
+        const url = `${API_BASE_REPORTS}?player=eq.${encodeURIComponent(playerName)}`;
+        const res = await fetch(url, {
+            method: "DELETE",
+            headers: supabaseHeaders()
+        });
+        if (!res.ok) throw new Error("delete failed: " + res.status);
         await quickRefreshCounts();
         await loadReports();
         return true;
@@ -784,7 +832,6 @@ async function removeReportCompletely(playerName) {
     }
 }
 
-// cleanup responded older than 72h
 async function cleanupOldResponded(reportsObj) {
     if (!reportsObj) return;
     const keys = Object.keys(reportsObj);
@@ -794,7 +841,7 @@ async function cleanupOldResponded(reportsObj) {
         if (!r) continue;
         const responded = !!(r.responded || r.response);
         if (!responded) continue;
-        const respondedAt = Number(r.respondedAt || r.respondedAtMillis || r.respondedTimestamp || r.responded_ts || r.timestamp || 0);
+        const respondedAt = Number(r.respondedAt || r.responded_at || r.respondedAtMillis || r.respondedTimestamp || r.responded_ts || r.timestamp || 0);
         const base = respondedAt || (r.timestamp ? Number(r.timestamp) : 0);
         if (!base) continue;
         if (now - base >= HOURS72_MS) {
@@ -808,31 +855,31 @@ async function cleanupOldResponded(reportsObj) {
     }
 }
 
-// ---------- Members load ----------
+/* =======================
+   Members: load (Supabase)
+   ======================= */
 async function loadMembers() {
     if (!memberContainer) return;
     memberContainer.innerHTML = "<div class='loading'>Đang tải danh sách thành viên...</div>";
     try {
-        const res = await fetch(API_URL_MEMBER);
-        if (!res.ok) throw new Error("Fetch failed");
-        const json = await res.json();
-        cachedMembers = json || {};
+        const url = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
+        if (!res.ok) throw new Error("Fetch failed: " + res.status);
+        const rows = await res.json();
+        cachedMembers = rowsToMembersObject(rows);
 
         bindMembersFilterUI();
 
-        // apply current filters/search to cachedMembers to produce filtered object
         const q = (searchMembersInput && searchMembersInput.value || "").trim();
         const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
         const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
         const filteredObj = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
 
-        // prepare list and render first chunk only
         membersRenderList = prepareMembersList(filteredObj);
         membersRenderIndex = 0;
         memberContainer.innerHTML = "";
         renderMembersChunk();
 
-        // update counts: updateTabCounts shows total members in tab; membersCountEl shows filtered count
         updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
         if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
     } catch (err) {
@@ -841,10 +888,11 @@ async function loadMembers() {
     }
 }
 
-// Ensure memberContainer is scrollable (see CSS note below)
+/* =======================
+   Scroll handler for infinite scroll
+   ======================= */
 if (memberContainer) {
     memberContainer.addEventListener("scroll", () => {
-        // near bottom threshold (200px)
         const nearBottom = memberContainer.scrollTop + memberContainer.clientHeight >= (memberContainer.scrollHeight - 200);
         if (nearBottom && membersRenderIndex < membersRenderList.length) {
             renderMembersChunk();
@@ -852,23 +900,25 @@ if (memberContainer) {
     });
 }
 
-// ---------- counts & polling ----------
+/* =======================
+   Counts & Polling (Supabase-based)
+   ======================= */
 async function getReportsCount() {
     try {
-        const res = await fetch(API_URL_REPORTS);
+        const url = `${API_BASE_REPORTS}?select=player`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
         if (!res.ok) return 0;
-        const j = await res.json();
-        if (!j) return 0;
-        return Object.keys(j).length;
+        const rows = await res.json();
+        return (rows && rows.length) ? rows.length : 0;
     } catch (e) { return 0; }
 }
 async function getMembersCount() {
     try {
-        const res = await fetch(API_URL_MEMBER);
+        const url = `${API_BASE_MEMBER}?select=user_id`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
         if (!res.ok) return 0;
-        const j = await res.json();
-        if (!j) return 0;
-        return Object.keys(j).length;
+        const rows = await res.json();
+        return (rows && rows.length) ? rows.length : 0;
     } catch (e) { return 0; }
 }
 async function quickRefreshCounts() {
@@ -882,14 +932,19 @@ function startCountsPolling(interval = 7000) {
     countsIntervalHandle = setInterval(quickRefreshCounts, interval);
 }
 
+/* =======================
+   Auto-polling functions
+   ======================= */
 let reportsPollTimeout = null;
 async function autoLoadReports(interval = 5000) {
     try {
-        const res = await fetch(API_URL_REPORTS);
+        const url = `${API_BASE_REPORTS}?select=*`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
         if (res.ok) {
-            const json = await res.json();
-            if (JSON.stringify(json || {}) !== JSON.stringify(cachedReports || {})) {
-                cachedReports = json || {};
+            const rows = await res.json();
+            const obj = rowsToReportsObject(rows);
+            if (JSON.stringify(obj || {}) !== JSON.stringify(cachedReports || {})) {
+                cachedReports = obj;
                 if (pageReports && pageReports.classList.contains("active")) {
                     const q = (searchReportsInput && searchReportsInput.value || "").trim();
                     const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
@@ -906,19 +961,19 @@ async function autoLoadReports(interval = 5000) {
 let membersPollTimeout = null;
 async function autoLoadMembers(interval = 12000) {
     try {
-        const res = await fetch(API_URL_MEMBER);
+        const url = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
         if (res.ok) {
-            const json = await res.json();
-            if (JSON.stringify(json || {}) !== JSON.stringify(cachedMembers || {})) {
-                cachedMembers = json || {};
+            const rows = await res.json();
+            const obj = rowsToMembersObject(rows);
+            if (JSON.stringify(obj || {}) !== JSON.stringify(cachedMembers || {})) {
+                cachedMembers = obj;
                 if (pageMembers && pageMembers.classList.contains("active")) {
-                    // compute filtered based on current UI values
                     const q = (searchMembersInput && searchMembersInput.value || "").trim();
                     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
                     const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-                    const filteredObj = filterMembersObject(cachedMembers, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+                    const filteredObj = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
 
-                    // reset and render first chunk
                     membersRenderList = prepareMembersList(filteredObj);
                     membersRenderIndex = 0;
                     memberContainer.innerHTML = "";
@@ -936,7 +991,9 @@ async function autoLoadMembers(interval = 12000) {
     }
 }
 
-// ---------- popup ----------
+/* =======================
+   Popup / Confirm
+   ======================= */
 function showConfirm(playerName, action) { selectedPlayer = playerName; pendingConfirmAction = action || "delete-as-respond"; popup && popup.classList.add("show"); }
 function hideConfirm() { selectedPlayer = null; pendingConfirmAction = null; popup && popup.classList.remove("show"); }
 confirmYes && confirmYes.addEventListener("click", async () => {
@@ -951,7 +1008,9 @@ confirmYes && confirmYes.addEventListener("click", async () => {
 confirmNo && confirmNo.addEventListener("click", hideConfirm);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideConfirm(); });
 
-// ---------- Reply modal ----------
+/* =======================
+   Reply modal
+   ======================= */
 function openReplyModal(playerName, report) {
     selectedPlayer = playerName;
     if (replyText) replyText.value = "";
@@ -974,7 +1033,9 @@ replySend && replySend.addEventListener("click", async () => {
     if (ok) closeReplyModal();
 });
 
-// ---------- Event wiring & search handlers ----------
+/* =======================
+   Event wiring & search handlers
+   ======================= */
 reloadBtn && reloadBtn.addEventListener("click", async () => {
     if (pageReports && pageReports.classList.contains("active")) await loadReports();
     else await loadMembers();
@@ -1012,16 +1073,16 @@ const onSearchMembers = debounce(async () => {
 searchReportsInput && searchReportsInput.addEventListener("input", onSearchReports);
 searchMembersInput && searchMembersInput.addEventListener("input", onSearchMembers);
 
-// Helper: apply search + current report filter and render
 async function filterAndRenderReports(q) {
     const filtered = await filterReportsObject(cachedReports || {}, q, currentReportFilter);
     await renderReports(filtered);
     if (reportsCountEl) reportsCountEl.textContent = Object.keys(filtered || {}).length + " result(s)";
 }
 
-// ---------- Reports filter binding (robust) ----------
+/* =======================
+   Reports filter binding
+   ======================= */
 let reportsFilterBound = false;
-
 function bindReportsFilter() {
     if (reportsFilterBound) return;
     const el = reportsFilterEl || document.getElementById("reports-filter");
@@ -1049,18 +1110,17 @@ function bindReportsFilter() {
 
     reportsFilterBound = true;
 }
-
 bindReportsFilter();
 document.addEventListener("DOMContentLoaded", bindReportsFilter);
 
-// ---------- Members filter UI binding ----------
+/* =======================
+   Members filter UI binding
+   ======================= */
 function bindMembersFilterUI() {
-    if (memberFilterContainer) return; // already bound
-    // Try to find page-members controls area
+    if (memberFilterContainer) return;
     const controls = pageMembers && pageMembers.querySelector ? pageMembers.querySelector(".page-controls") : null;
     if (!controls) return;
 
-    // create filter container
     const container = document.createElement("div");
     container.className = "members-filter";
     container.style.display = "flex";
@@ -1087,7 +1147,6 @@ function bindMembersFilterUI() {
     btnOffline.setAttribute("data-filter", "offline");
     btnOffline.textContent = "Offline";
 
-    // simple styling for small buttons (you can adjust CSS)
     [btnAll, btnOnline, btnOffline].forEach(b => {
         b.style.padding = "6px 10px";
         b.style.borderRadius = "6px";
@@ -1101,11 +1160,9 @@ function bindMembersFilterUI() {
     container.appendChild(btnOnline);
     container.appendChild(btnOffline);
 
-    // insert container into controls (placed after search input)
     controls.appendChild(container);
     memberFilterContainer = container;
 
-    // click handler
     container.addEventListener("click", (ev) => {
         const t = ev.target;
         const btn = (t && typeof t.closest === "function") ? t.closest(".member-filter-btn") : null;
@@ -1113,10 +1170,8 @@ function bindMembersFilterUI() {
         const filter = btn.getAttribute("data-filter");
         if (!filter) return;
         currentMemberStatusFilter = filter;
-        // update active classes
         const all = container.querySelectorAll(".member-filter-btn");
         all.forEach(b => b.classList.toggle("active", b === btn));
-        // re-run members search/render with current search and filters
         const q = (searchMembersInput && searchMembersInput.value || "").trim();
         const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
         const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
@@ -1125,12 +1180,12 @@ function bindMembersFilterUI() {
         if (membersCountEl) membersCountEl.textContent = Object.keys(filtered || {}).length + " member(s)";
     });
 }
-
-// try immediate bind (if DOM available) and also on DOMContentLoaded
 bindMembersFilterUI();
 document.addEventListener("DOMContentLoaded", bindMembersFilterUI);
 
-// filter apply/clear for members
+/* =======================
+   Filter apply / clear
+   ======================= */
 applyFilterBtn && applyFilterBtn.addEventListener("click", async () => {
     const q = (searchMembersInput && searchMembersInput.value || "").trim();
     const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
@@ -1151,7 +1206,9 @@ clearFilterBtn && clearFilterBtn.addEventListener("click", async () => {
     await loadMembers();
 });
 
-// ---------- initial ----------
+/* =======================
+   Init / start polling
+   ======================= */
 (async function init() {
     startCountsPolling(7000);
     await quickRefreshCounts();
@@ -1160,7 +1217,9 @@ clearFilterBtn && clearFilterBtn.addEventListener("click", async () => {
     autoLoadMembers(12000);
 })();
 
-// ===== Scroll To Top Button =====
+/* =======================
+   Scroll to top button
+   ======================= */
 const scrollBtn = document.getElementById("scrollTopBtn");
 if (scrollBtn) {
     window.addEventListener("scroll", () => {
