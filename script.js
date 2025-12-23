@@ -162,6 +162,30 @@ function debounce(fn, wait = 300) {
 /* =======================
    Supabase REST helpers
    ======================= */
+
+// ---- fetchAllFromSupabase: fetch >1000 rows by looping with limit/offset ----
+async function fetchAllFromSupabase(baseUrl) {
+    const pageSize = 1000;
+    const all = [];
+    let offset = 0;
+    // determine separator for query params
+    const sep = baseUrl.indexOf('?') !== -1 ? '&' : '?';
+
+    while (true) {
+        const url = `${baseUrl}${sep}limit=${pageSize}&offset=${offset}`;
+        const res = await fetch(url, { headers: supabaseHeaders() });
+        if (!res.ok) throw new Error("Fetch failed: " + res.status);
+        const rows = await res.json();
+        if (!rows || rows.length === 0) break;
+        all.push(...rows);
+        if (rows.length < pageSize) break;
+        offset += pageSize;
+        // small delay to avoid hitting rate-limits
+        await new Promise(r => setTimeout(r, 150));
+    }
+    return all;
+}
+
 function supabaseHeaders(extra = {}) {
     return Object.assign({
         "apikey": SUPABASE_KEY,
@@ -772,10 +796,8 @@ async function loadReports() {
     if (!reportContainer) return;
     reportContainer.innerHTML = "<div class='loading'>Đang tải dữ liệu...</div>";
     try {
-        const url = `${API_BASE_REPORTS}?select=*`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (!res.ok) throw new Error("Fetch failed: " + res.status);
-        const rows = await res.json();
+        const base = `${API_BASE_REPORTS}?select=*`;
+        const rows = await fetchAllFromSupabase(base);
         cachedReports = rowsToReportsObject(rows);
 
         bindReportsFilter();
@@ -862,10 +884,8 @@ async function loadMembers() {
     if (!memberContainer) return;
     memberContainer.innerHTML = "<div class='loading'>Đang tải danh sách thành viên...</div>";
     try {
-        const url = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (!res.ok) throw new Error("Fetch failed: " + res.status);
-        const rows = await res.json();
+        const base = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
+        const rows = await fetchAllFromSupabase(base);
         cachedMembers = rowsToMembersObject(rows);
 
         bindMembersFilterUI();
@@ -906,21 +926,37 @@ if (memberContainer) {
 async function getReportsCount() {
     try {
         const url = `${API_BASE_REPORTS}?select=player`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (!res.ok) return 0;
-        const rows = await res.json();
-        return (rows && rows.length) ? rows.length : 0;
+        // Try HEAD + Prefer count=exact (fast if CORS allows)
+        const headRes = await fetch(url, { method: "HEAD", headers: supabaseHeaders({ "Prefer": "count=exact" }) });
+        if (headRes.ok) {
+            const cr = headRes.headers.get("content-range");
+            if (cr) {
+                const m = cr.match(/\/(\d+)$/);
+                if (m) return parseInt(m[1], 10);
+            }
+        }
+        // fallback: fetch all and count
+        const rows = await fetchAllFromSupabase(url);
+        return rows.length;
     } catch (e) { return 0; }
 }
+
 async function getMembersCount() {
     try {
         const url = `${API_BASE_MEMBER}?select=user_id`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (!res.ok) return 0;
-        const rows = await res.json();
-        return (rows && rows.length) ? rows.length : 0;
+        const headRes = await fetch(url, { method: "HEAD", headers: supabaseHeaders({ "Prefer": "count=exact" }) });
+        if (headRes.ok) {
+            const cr = headRes.headers.get("content-range");
+            if (cr) {
+                const m = cr.match(/\/(\d+)$/);
+                if (m) return parseInt(m[1], 10);
+            }
+        }
+        const rows = await fetchAllFromSupabase(url);
+        return rows.length;
     } catch (e) { return 0; }
 }
+
 async function quickRefreshCounts() {
     const [rCount, mCount] = await Promise.all([getReportsCount(), getMembersCount()]);
     updateTabCounts(rCount, mCount);
@@ -938,18 +974,15 @@ function startCountsPolling(interval = 7000) {
 let reportsPollTimeout = null;
 async function autoLoadReports(interval = 5000) {
     try {
-        const url = `${API_BASE_REPORTS}?select=*`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (res.ok) {
-            const rows = await res.json();
-            const obj = rowsToReportsObject(rows);
-            if (JSON.stringify(obj || {}) !== JSON.stringify(cachedReports || {})) {
-                cachedReports = obj;
-                if (pageReports && pageReports.classList.contains("active")) {
-                    const q = (searchReportsInput && searchReportsInput.value || "").trim();
-                    const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
-                    await renderReports(filtered);
-                }
+        const base = `${API_BASE_REPORTS}?select=*`;
+        const rows = await fetchAllFromSupabase(base);
+        const obj = rowsToReportsObject(rows);
+        if (JSON.stringify(obj || {}) !== JSON.stringify(cachedReports || {})) {
+            cachedReports = obj;
+            if (pageReports && pageReports.classList.contains("active")) {
+                const q = (searchReportsInput && searchReportsInput.value || "").trim();
+                const filtered = await filterReportsObject(cachedReports, q, currentReportFilter);
+                await renderReports(filtered);
             }
         }
     } catch (err) {
@@ -958,30 +991,28 @@ async function autoLoadReports(interval = 5000) {
         reportsPollTimeout = setTimeout(() => autoLoadReports(interval), interval);
     }
 }
+
 let membersPollTimeout = null;
 async function autoLoadMembers(interval = 12000) {
     try {
-        const url = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
-        const res = await fetch(url, { headers: supabaseHeaders() });
-        if (res.ok) {
-            const rows = await res.json();
-            const obj = rowsToMembersObject(rows);
-            if (JSON.stringify(obj || {}) !== JSON.stringify(cachedMembers || {})) {
-                cachedMembers = obj;
-                if (pageMembers && pageMembers.classList.contains("active")) {
-                    const q = (searchMembersInput && searchMembersInput.value || "").trim();
-                    const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
-                    const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
-                    const filteredObj = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
+        const base = `${API_BASE_MEMBER}?select=user_id,username,games,online,last_seen`;
+        const rows = await fetchAllFromSupabase(base);
+        const obj = rowsToMembersObject(rows);
+        if (JSON.stringify(obj || {}) !== JSON.stringify(cachedMembers || {})) {
+            cachedMembers = obj;
+            if (pageMembers && pageMembers.classList.contains("active")) {
+                const q = (searchMembersInput && searchMembersInput.value || "").trim();
+                const minVal = (filterGamesMinInput && filterGamesMinInput.value || "").trim();
+                const maxVal = (filterGamesMaxInput && filterGamesMaxInput.value || "").trim();
+                const filteredObj = filterMembersObject(cachedMembers || {}, q, minVal === "" ? null : minVal, maxVal === "" ? null : maxVal, currentMemberStatusFilter);
 
-                    membersRenderList = prepareMembersList(filteredObj);
-                    membersRenderIndex = 0;
-                    memberContainer.innerHTML = "";
-                    renderMembersChunk();
+                membersRenderList = prepareMembersList(filteredObj);
+                membersRenderIndex = 0;
+                memberContainer.innerHTML = "";
+                renderMembersChunk();
 
-                    if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
-                    updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
-                }
+                if (membersCountEl) membersCountEl.textContent = `${membersRenderList.length} member(s)`;
+                updateTabCounts(Object.keys(cachedReports || {}).length, Object.keys(cachedMembers).length);
             }
         }
     } catch (err) {
